@@ -114,3 +114,22 @@ Next device gate:
    considering any bundled loader
 
 Do not interpret the missing `vulkaninfo` command as a Vulkan failure.
+
+
+## 2026-09-22 — Mali ICD is not the Vulkan loader
+
+The real-device probe can `dlopen("/usr/lib/libmali.so")`, but direct lookup of
+`vkGetInstanceProcAddr`, `vkCreateInstance` and
+`vkEnumerateInstanceExtensionProperties` fails.
+
+That is compatible with `libmali.so` being an ICD rather than the system
+Vulkan loader. The ICD JSON already points the loader to this library.
+
+Next checks:
+
+- search `/usr/lib64` and `/lib64` for `libvulkan.so*`
+- test ICD exports:
+  - `vk_icdGetInstanceProcAddr`
+  - `vk_icdNegotiateLoaderICDInterfaceVersion`
+- if the loader is truly absent, provide only a Vulkan loader compatible with
+  the installed ICD; do not replace or bundle the Mali driver
