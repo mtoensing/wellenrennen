@@ -5,6 +5,15 @@ on:
   push:
     branches:
       - prototype/rg40xx
+    paths:
+      - ".github/workflows/build-arm64.yml"
+      - "scripts/build-arm64.sh"
+      - "scripts/versions.sh"
+      - "patches/**"
+
+concurrency:
+  group: build-arm64-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   probe:
