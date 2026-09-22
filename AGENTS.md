@@ -6,6 +6,12 @@ Wave Race 64: Recompiled on the real RG40XX H test device.
 Do not optimize, refactor, redesign or prepare a PortMaster PR before the game
 actually runs on the hardware.
 
+## Before doing any work
+
+Read `KNOWN_BLOCKERS.md` after this file. It records failures already reproduced by CI or the real device. Do not rediscover a documented blocker from scratch.
+
+When a blocker is proven or resolved, update `KNOWN_BLOCKERS.md` with the evidence and commit that change with the fix. Keep assumptions out of that file.
+
 ## Goal
 
 Create/use:
