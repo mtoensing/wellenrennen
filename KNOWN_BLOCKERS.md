@@ -158,3 +158,39 @@ forbids without an explicit decision. Stop here until that decision is made.
 ROM on the device, verified:
 `/userdata/roms/n64/Wave Race 64 - Kawasaki Jet Ski (USA) (Rev 1).z64`,
 SHA-1 `508dfc2d4caa42b6f6de5263d0aed5e44ac7966a`.
+
+## 2026-09-22 — Vulkan works on stock KNULLI through PortMaster runtimes
+
+Constraint from the owner: the port must run on stock KNULLI on this test
+device; nothing on the system may be changed; everything goes through
+PortMaster. So the Vulkan path is software (Lavapipe) from PortMaster's own
+runtimes, not a replacement Mali driver.
+
+Proven on the RG40XX H:
+
+- `harbourmaster runtime_check` installs `weston_pkg_0.2.squashfs`
+  (Westonwrap 0.2.7.1) and `mesa_pkg_0.1.squashfs` (Mesa 24.3.0-devel,
+  LLVM 19.1.2) into `PortMaster/libs/`.
+- Mesapack ships `libvulkan_lvp.so` + `share/vulkan/icd.d/lvp_icd.aarch64.json`
+  but **no Vulkan loader**, and Lavapipe additionally needs
+  `libxcb-randr.so.0`, `libxcb-dri3.so.0`, `libxcb-present.so.0`,
+  `libxcb-sync.so.1`, which neither runtime ships. With those four and the
+  Khronos loader `libvulkan.so.1` (1.3.204, Ubuntu 22.04) on the library
+  path, `vulkaninfo` reports `llvmpipe (LLVM 19.1.2, 128 bits)`,
+  Vulkan 1.3.296, with `VK_KHR_xcb_surface`, `VK_KHR_xlib_surface`,
+  `VK_KHR_wayland_surface`, `VK_EXT_headless_surface`.
+- KNULLI's SDL2 (2.32.8) has only the `mali` video driver, no X11/Wayland,
+  and `/dev/dri` does not exist (only `/dev/fb0`). A Vulkan surface therefore
+  needs Westonpack: `westonwrap.sh drm gl kiosk llvmpipe` starts Weston +
+  Xwayland rendered through crusty -> KNULLI SDL2/Mali GLES.
+- `vkcube --width 640 --height 480` (X11/xcb WSI) inside that mode ran
+  400 frames in about 5 s, exit code 0, and the rendered cube was read back
+  from `/dev/fb0` (`docs/evidence/2026-09-22-vkcube-lavapipe-westonpack.png`).
+
+Not yet proven: RT64 on Lavapipe, and its speed on 4x Cortex-A53.
+
+Rejected for now: a Vulkan-capable Mali blob (Hardkernel RK3326
+`r13p0_gbm_with_vulkan_and_cl`, same Mali-G31 MP2) — the official download is
+behind a Cloudflare browser check, it is a GBM build while this device has no
+`/dev/dri`, and its redistribution terms are unclear. Rockchip's current
+`libmali-bifrost-g31-g24p0-*` exports no `vk*` symbols.
