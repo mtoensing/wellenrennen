@@ -1,0 +1,73 @@
+Use the supplied Wellenrennen bootstrap as-is.
+
+Repository:
+- https://github.com/mtoensing/wellenrennen
+- branch: prototype/rg40xx
+
+Target:
+- PortMaster
+- Anbernic RG40XX H
+- KNULLI
+- H700 / 4x Cortex-A53 / aarch64
+- Mali-G31 MP2
+- 1 GB RAM
+- 640x480
+- SSH: root@192.168.178.76
+- KNULLI default password: linux
+- persistent storage: /userdata
+- PortMaster path: /userdata/roms/ports
+
+Read AGENTS.md first.
+Then read KNOWN_BLOCKERS.md.
+Read SOURCES.md only when a source/reference is needed.
+
+Do not redo broad research and do not start with enhancements.
+
+Work only from observed build/runtime failures.
+
+Order:
+1. make the ROM-free ARM64 dependency probe green
+2. run scripts/probe-rg40xx.sh against the real device
+3. establish the complete ARM64 build using the user's verified USA Rev A ROM outside git
+4. package
+5. deploy
+6. smoke test
+7. fetch logs
+8. fix the smallest actual blocker
+9. reach menu
+10. controller
+11. audio
+12. one playable race
+13. stable native ~30 Hz race simulation
+14. only then attempt 60 FPS RT64 presentation
+
+Do not commit:
+- ROMs
+- RecompiledFuncs/
+- ELF/disassembly output
+- ROM-derived files
+
+Do not start with:
+- HD textures
+- modern/high water
+- replacement music
+- haptics
+- widescreen
+- PGO
+- overclocking
+- Weston
+- custom Mesa/Mali drivers
+- PortMaster PR cleanup
+
+Use WR64_ROM to point at the local ROM when the full build needs it.
+
+Keep status replies to:
+
+Build: PASS/FAIL — ...
+Deploy: PASS/FAIL — ...
+Vulkan: PASS/FAIL — ...
+Device: PASS/FAIL — ...
+Game rate: ...
+Presentation: ...
+Changed: ...
+Next: ...
