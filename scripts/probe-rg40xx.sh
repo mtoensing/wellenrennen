@@ -33,7 +33,7 @@ find /usr/lib /lib -maxdepth 4 -iname 'libSDL2*.so*' 2>/dev/null | head -40 || t
 
 echo "=== Vulkan loader ==="
 ldconfig -p 2>/dev/null | grep -i vulkan || true
-find /usr/lib /lib -maxdepth 4 -iname 'libvulkan*.so*' 2>/dev/null | head -40 || true
+find /usr/lib /usr/lib64 /lib /lib64 -maxdepth 4 -iname 'libvulkan*.so*' 2>/dev/null | head -80 || true
 
 echo "=== Mali Vulkan exports ==="
 if [ -f /usr/lib/libmali.so ]; then
@@ -62,12 +62,30 @@ p="/usr/lib/libmali.so"
 try:
     lib=ctypes.CDLL(p)
     print("dlopen PASS:", p)
-    for s in ("vkGetInstanceProcAddr","vkCreateInstance","vkEnumerateInstanceExtensionProperties"):
+    for s in (
+        "vkGetInstanceProcAddr",
+        "vkCreateInstance",
+        "vkEnumerateInstanceExtensionProperties",
+        "vk_icdGetInstanceProcAddr",
+        "vk_icdNegotiateLoaderICDInterfaceVersion",
+    ):
         try:
             getattr(lib,s)
             print("dlsym PASS:", s)
         except AttributeError:
             print("dlsym FAIL:", s)
+
+    try:
+        negotiate = lib.vk_icdNegotiateLoaderICDInterfaceVersion
+        negotiate.argtypes = [ctypes.POINTER(ctypes.c_uint32)]
+        negotiate.restype = ctypes.c_int32
+        version = ctypes.c_uint32(7)
+        result = negotiate(ctypes.byref(version))
+        print("ICD negotiate result:", result, "version:", version.value)
+    except AttributeError:
+        print("ICD negotiate: symbol unavailable")
+    except Exception as e:
+        print("ICD negotiate ERROR:", e)
 except OSError as e:
     print("dlopen FAIL:", e)
 PY
