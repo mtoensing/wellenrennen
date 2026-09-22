@@ -56,18 +56,8 @@ Never commit the ROM or generated ROM-derived files to make CI pass.
 
 ## Real-device Vulkan status
 
-Not yet proven.
-
-This is the highest-value device gate:
-
-Can pinned RT64 create and present through Vulkan on the RG40XX H / H700 /
-Mali-G31 MP2 under KNULLI?
-
-Run:
-
-`bash scripts/probe-rg40xx.sh`
-
-before inventing graphics workarounds.
+FAIL — the installed KNULLI Mali driver has no Vulkan implementation.
+See "2026-09-22 — installed libmali has no Vulkan at all" below.
 
 ## Performance
 
@@ -133,3 +123,38 @@ Next checks:
   - `vk_icdNegotiateLoaderICDInterfaceVersion`
 - if the loader is truly absent, provide only a Vulkan loader compatible with
   the installed ICD; do not replace or bundle the Mali driver
+
+
+## 2026-09-22 — installed libmali has no Vulkan at all
+
+Evidence from the real RG40XX H (KNULLI, kernel 4.9.170):
+
+- `/usr/lib/libmali.so` -> `libmali.so.0.20.0` (44542232 bytes), identical
+  copy in `/usr/lib64`; driver string `r20p0-01rel0`.
+- kernel module `mali_kbase` version `r20p0-01rel0 (UK version 11.17)`;
+  GPU identified as `arch 7.0.9` (Bifrost, Mali-G31).
+- `nm -D --defined-only` on the device's `libmali.so.0.20.0` (copied to the
+  host): 1376 exported symbols — 642 `gl*`, 109 `cl*` (OpenCL), 44 `egl*`,
+  **0 `vk*`**. No `vk_icdGetInstanceProcAddr`,
+  `vk_icdNegotiateLoaderICDInterfaceVersion`, `vkGetInstanceProcAddr` or
+  `vkCreateInstance`.
+- `grep -a` for `vk_icd`, `vkCreate`, `VK_KHR` in the blob: 0 matches.
+- The library has `fbdev` strings and no `gbm`/`wl_display` strings: it is
+  the fbdev GLES/EGL/OpenCL build of the blob.
+- No `libvulkan.so*` anywhere on the rootfs; no `vulkaninfo`.
+  KNULLI's own `/usr/bin/knulli-vulkan hasVulkan` prints `Vulkan not found`.
+- `/usr/share/vulkan/icd.d/mali_icd.json` exists but points at this
+  non-Vulkan blob; the JSON is stale and is not evidence of Vulkan support.
+
+Conclusion: bundling only a Vulkan loader cannot help — there is no ICD for
+it to load. RT64 at the pinned revision has no GL/GLES backend on Linux, so
+the documented first runtime gate (RT64 creates a Vulkan device and presents
+a frame) cannot pass on the stock KNULLI graphics stack.
+
+Every remaining route replaces part of the graphics stack (a Vulkan-capable
+Mali blob, or a GLES backend/translation layer for RT64), which AGENTS.md
+forbids without an explicit decision. Stop here until that decision is made.
+
+ROM on the device, verified:
+`/userdata/roms/n64/Wave Race 64 - Kawasaki Jet Ski (USA) (Rev 1).z64`,
+SHA-1 `508dfc2d4caa42b6f6de5263d0aed5e44ac7966a`.
