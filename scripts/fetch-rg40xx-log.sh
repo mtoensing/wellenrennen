@@ -8,7 +8,7 @@ REMOTE="/userdata/roms/ports/wellenrennen"
 
 mkdir -p "$ROOT/device-logs"
 
-for name in portmaster.log wr64.log smoke.log; do
+for name in log.txt portmaster.log wr64.log smoke.log; do
   scp "${USER}@${HOST}:$REMOTE/$name"       "$ROOT/device-logs/$name" 2>/dev/null || true
 done
 

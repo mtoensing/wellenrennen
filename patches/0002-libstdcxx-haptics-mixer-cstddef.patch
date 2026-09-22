@@ -1,0 +1,11 @@
+diff --git a/include/wr64/haptics_mixer.h b/include/wr64/haptics_mixer.h
+--- a/include/wr64/haptics_mixer.h
++++ b/include/wr64/haptics_mixer.h
+@@ -1,6 +1,7 @@
+ #pragma once
+ 
+ #include <array>
++#include <cstddef>
+ #include <cstdint>
+ #include "wr64/haptics_output.h"
+ 

@@ -8,19 +8,28 @@
   "items_opt": [],
   "attr": {
     "title": "Wellenrennen",
-    "porter": ["mtoensing"],
-    "desc": "Experimental aarch64 PortMaster bring-up of Wave Race 64: Recompiled. Requires the user's own supported ROM.",
+    "porter": [
+      "mtoensing"
+    ],
+    "desc": "Experimental aarch64 PortMaster bring-up of Wave Race 64: Recompiled (RT64 over Vulkan via Westonpack + Mesapack Lavapipe). Requires the user's own supported ROM.",
     "desc_md": null,
     "inst": "Copy your own legally obtained Wave Race 64 (USA) (Rev A) .z64 ROM into wellenrennen/. No Nintendo ROM data is included.",
     "inst_md": null,
-    "genres": ["racing"],
+    "genres": [
+      "racing"
+    ],
     "image": null,
     "rtr": false,
     "exp": true,
-    "runtime": [],
+    "runtime": [
+      "weston_pkg_0.2",
+      "mesa_pkg_0.1"
+    ],
     "store": [],
     "availability": "paid",
     "reqs": [],
-    "arch": ["aarch64"]
+    "arch": [
+      "aarch64"
+    ]
   }
 }

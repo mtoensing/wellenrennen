@@ -1,0 +1,13 @@
+diff --git a/recompinput/include/recompinput/recompinput.h b/recompinput/include/recompinput/recompinput.h
+--- a/recompinput/include/recompinput/recompinput.h
++++ b/recompinput/include/recompinput/recompinput.h
+@@ -1,7 +1,9 @@
+ #pragma once
+ 
+ #include "SDL.h"
+ #include "chrono"
++#include <cstddef>
++#include <string>
+ 
+ namespace recompinput {
+     constexpr size_t max_num_players_supported = 128;

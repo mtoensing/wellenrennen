@@ -1,64 +1,74 @@
 #!/usr/bin/env bash
+# Launch the deployed port through its real PortMaster launcher on the
+# RG40XX H, grab framebuffer screenshots while it runs, then stop it.
+#
+#   SMOKE_SECONDS=90 bash scripts/smoke-rg40xx.sh
+#
+# The device's SDL2 has no offscreen driver, so the run owns the real display:
+# EmulationStation is paused for the duration and always resumed.
+# Output: device-logs/smoke.log, device-logs/log.txt, device-logs/fb-*.png
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HOST="${RG40XX_HOST:-192.168.178.76}"
 USER="${RG40XX_USER:-root}"
+SECONDS_TO_RUN="${SMOKE_SECONDS:-90}"
+SHOTS="${SMOKE_SHOTS:-30 60 85}"
 
-ssh "${USER}@${HOST}" bash -s <<'REMOTE'
+mkdir -p "$ROOT/device-logs"
+rm -f "$ROOT"/device-logs/fb-*.png "$ROOT"/device-logs/fb-*.raw
+
+ssh "${USER}@${HOST}" "SECONDS_TO_RUN=$SECONDS_TO_RUN SHOTS='$SHOTS' bash -s" <<'REMOTE' | tee "$ROOT/device-logs/smoke.log"
 set -u
-
 GAMEDIR="/userdata/roms/ports/wellenrennen"
-BIN="$GAMEDIR/WaveRace64Recomp.aarch64"
-LOG="$GAMEDIR/smoke.log"
-
-mkdir -p "$GAMEDIR"
-exec > >(tee "$LOG") 2>&1
+export HOME=/userdata/system
+export XDG_DATA_HOME=/userdata/system/.local/share
 
 echo "=== target ==="
 uname -a
-cat /etc/os-release 2>/dev/null || true
+file "$GAMEDIR/WaveRace64Recomp.aarch64" 2>/dev/null || echo "BLOCKER: binary not deployed"
+ls "$GAMEDIR"/*.z64 2>/dev/null || echo "BLOCKER: no ROM in $GAMEDIR"
 
-echo "=== binary ==="
-file "$BIN" 2>/dev/null || echo "BLOCKER: binary not deployed"
+ES_PID="$(pgrep -f 'exit-on-reboot-required' | head -1)"
+resume_es() { [ -n "$ES_PID" ] && kill -CONT "$ES_PID" 2>/dev/null || true; }
+trap resume_es EXIT
+[ -n "$ES_PID" ] && kill -STOP "$ES_PID" 2>/dev/null || true
 
-echo "=== dynamic dependencies ==="
-ldd "$BIN" 2>&1 || true
-
-echo "=== SDL2 ==="
-ldconfig -p 2>/dev/null | grep -i SDL2 || true
-find /usr/lib /lib -maxdepth 3 -iname 'libSDL2*.so*' 2>/dev/null | head -20 || true
-
-echo "=== graphics devices ==="
-ls -la /dev/dri 2>/dev/null || true
-ls -la /dev/mali* 2>/dev/null || true
-
-echo "=== Vulkan ==="
-ldconfig -p 2>/dev/null | grep -i vulkan || true
-find /usr/share/vulkan /etc/vulkan /usr/lib /lib \
-  -maxdepth 4 \( -iname '*vulkan*' -o -iname '*icd*.json' \) \
-  2>/dev/null | head -80 || true
-
-if command -v vulkaninfo >/dev/null 2>&1; then
-  vulkaninfo --summary 2>&1 || true
-fi
-
-echo "=== ROM ==="
-ROM=""
-for f in "$GAMEDIR"/*.z64; do
-  [ -f "$f" ] && ROM="$f" && break
+rm -f /tmp/wr64-fb-*.raw
+for t in $SHOTS; do
+  ( sleep "$t"; dd if=/dev/fb0 of=/tmp/wr64-fb-$t.raw bs=2560 count=480 2>/dev/null ) &
 done
+( sleep 20; top -b -n 1 | head -15 > /tmp/wr64-top.txt ) &
 
-if [ -z "$ROM" ]; then
-  echo "BLOCKER: copy Wave Race 64 (USA) (Rev A).z64 into $GAMEDIR"
-  exit 2
-fi
-
-echo "ROM: $ROM"
-
-if [ ! -f "$BIN" ]; then
-  exit 3
-fi
-
-echo "Vulkan/device probe complete."
-echo "Do not launch RT64 here until a complete ARM64 runtime build is deployed."
+start=$(date +%s)
+timeout -s INT "$SECONDS_TO_RUN" bash /userdata/roms/ports/Wellenrennen.sh >/dev/null 2>&1
+rc=$?
+end=$(date +%s)
+# The launcher may be killed before its own cleanup; do it here.
+pkill -9 -f WaveRace64Recomp 2>/dev/null
+/tmp/weston/westonwrap.sh cleanup >/dev/null 2>&1
+pkill -9 gptokeyb 2>/dev/null
+echo "=== launcher exit: $rc after $((end - start)) s (124 = still running at timeout) ==="
+echo "=== top at 20 s ==="
+cat /tmp/wr64-top.txt 2>/dev/null
 REMOTE
+
+scp -q "${USER}@${HOST}:/userdata/roms/ports/wellenrennen/log.txt" "$ROOT/device-logs/log.txt" 2>/dev/null || true
+for t in $SHOTS; do
+  scp -q "${USER}@${HOST}:/tmp/wr64-fb-$t.raw" "$ROOT/device-logs/fb-$t.raw" 2>/dev/null || continue
+  python3 - "$ROOT/device-logs/fb-$t.raw" "$ROOT/device-logs/fb-$t.png" <<'PY'
+import struct, sys, zlib
+raw = open(sys.argv[1], "rb").read()
+w, h = 640, 480
+rows = b"".join(
+    b"\x00" + bytes(c for i in range(w) for c in (raw[(y*w+i)*4+2], raw[(y*w+i)*4+1], raw[(y*w+i)*4]))
+    for y in range(h))
+def chunk(t, b):
+    return struct.pack(">I", len(b)) + t + b + struct.pack(">I", zlib.crc32(t + b) & 0xffffffff)
+open(sys.argv[2], "wb").write(b"\x89PNG\r\n\x1a\n"
+    + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+    + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+PY
+  rm -f "$ROOT/device-logs/fb-$t.raw"
+done
+ls -la "$ROOT/device-logs"
