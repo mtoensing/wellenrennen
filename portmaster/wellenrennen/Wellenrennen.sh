@@ -79,15 +79,20 @@ pm_platform_helper "$BIN"
 
 # libs.aarch64 holds only what the runtimes lack: the Khronos Vulkan loader,
 # the xcb extensions Lavapipe links against, and an X11-capable SDL2.
+#
+# westonwrap eval()s the app command line, so anything after the gllib
+# argument must survive a second round of shell parsing: values with spaces
+# (the controller mapping, ROM names like "Wave Race 64 - ...") go into the
+# environment of the whole stack instead, and paths are %q-quoted.
 $ESUDO env \
   VK_ICD_FILENAMES="$mesa_dir/share/vulkan/icd.d/lvp_icd.aarch64.json" \
   WRAPPED_LIBRARY_PATH="$GAMEDIR/libs.${DEVICE_ARCH}" \
   WESTON_KIOSK_NO_RESIZE=1 \
-  $weston_dir/westonwrap.sh drm gl kiosk llvmpipe \
-  WAYLAND_DISPLAY= SDL_VIDEODRIVER=x11 \
   SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig" \
   SDL_GAMECONTROLLERCONFIG_FILE="$SDL_GAMECONTROLLERCONFIG_FILE" \
-  "$BIN" "$ROM"
+  $weston_dir/westonwrap.sh drm gl kiosk llvmpipe \
+  WAYLAND_DISPLAY= SDL_VIDEODRIVER=x11 \
+  "$(printf '%q' "$BIN")" "$(printf '%q' "$ROM")"
 
 $ESUDO $weston_dir/westonwrap.sh cleanup
 if [[ "$PM_CAN_MOUNT" != "N" ]]; then

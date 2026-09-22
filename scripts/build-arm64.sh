@@ -162,6 +162,8 @@ if [ ! -f RecompiledFuncs/aspMain_rsp.cpp ]; then
 fi
 
 # --- the game ---
+# NFD_PORTAL: RT64's file dialog uses xdg-desktop-portal over D-Bus instead of
+# GTK 3, which CFWs do not ship. The port passes the ROM on the command line.
 # RT64 only defines PLUME_SDL_VULKAN_ENABLED inside its own directory scope.
 # RecompFrontend is a sibling and would otherwise see plume's X11
 # RenderWindow while ultramodern hands it an SDL_Window*.
@@ -169,6 +171,7 @@ cmake -S . -B "$BUILD" -G Ninja \
   -DCMAKE_BUILD_TYPE=RelWithDebInfo \
   -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
   -DRT64_SDL_WINDOW_VULKAN=ON \
+  -DNFD_PORTAL=ON \
   -DCMAKE_C_FLAGS="-DPLUME_SDL_VULKAN_ENABLED" \
   -DCMAKE_CXX_FLAGS="-DPLUME_SDL_VULKAN_ENABLED" \
   -DSDL2_INCLUDE_DIRS="$(sdl2-config --cflags | sed -n 's/.*-I\([^ ]*\).*/\1/p')" \

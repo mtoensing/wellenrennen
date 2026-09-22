@@ -35,6 +35,10 @@ docker run --rm -v wr64-work:/work -v "$PORT:/out" "$IMAGE" bash -c '
   set -e
   cp /work/build-arm64/WaveRace64Recomp /out/WaveRace64Recomp.aarch64
   cp -R /work/build-arm64/assets /out/assets
+  # Baseline bring-up (AGENTS.md): original music and textures. The
+  # replacement soundtrack is decoded fully into RAM at startup (~300 MB),
+  # which leaves too little of the 1 GB for the 512 MiB librecomp RDRAM commit.
+  rm -rf /out/assets/music /out/assets/textures
   apt-get update -qq >/dev/null
   apt-get install -y -qq libvulkan1 libxcb-randr0 libxcb-dri3-0 libxcb-present0 libxcb-sync1 >/dev/null 2>&1
   for l in libvulkan.so.1 libxcb-randr.so.0 libxcb-dri3.so.0 libxcb-present.so.0 libxcb-sync.so.1; do

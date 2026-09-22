@@ -41,7 +41,7 @@ done
 ( sleep 20; top -b -n 1 | head -15 > /tmp/wr64-top.txt ) &
 
 start=$(date +%s)
-timeout -s INT "$SECONDS_TO_RUN" bash /userdata/roms/ports/Wellenrennen.sh >/dev/null 2>&1
+timeout -k 15 -s INT "$SECONDS_TO_RUN" bash /userdata/roms/ports/Wellenrennen.sh >/dev/null 2>&1
 rc=$?
 end=$(date +%s)
 # The launcher may be killed before its own cleanup; do it here.

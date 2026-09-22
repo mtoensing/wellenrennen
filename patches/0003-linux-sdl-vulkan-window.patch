@@ -1,0 +1,14 @@
+diff --git a/src/callbacks.cpp b/src/callbacks.cpp
+--- a/src/callbacks.cpp
++++ b/src/callbacks.cpp
+@@ -796,6 +796,10 @@
+     Uint32 flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI;
+ #if defined(__APPLE__)
+     flags |= SDL_WINDOW_METAL;
++#elif defined(__linux__)
++    // RT64 is built with RT64_SDL_WINDOW_VULKAN on Linux and creates its
++    // surface with SDL_Vulkan_CreateSurface, which needs a Vulkan window.
++    flags |= SDL_WINDOW_VULKAN;
+ #endif
+ 
+     SDL_Rect display{};
