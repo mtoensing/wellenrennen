@@ -44,7 +44,35 @@ if [ -f /usr/lib/libmali.so ]; then
   elif command -v nm >/dev/null 2>&1; then
     nm -D /usr/lib/libmali.so 2>/dev/null | grep -E 'vkGetInstanceProcAddr|vkCreateInstance|vkEnumerateInstance' | head -30 || true
   else
-    echo "readelf/nm unavailable; cannot inspect Vulkan exports"
+    echo "readelf/nm unavailable; using binary string fallback"
+    for sym in vkGetInstanceProcAddr vkCreateInstance vkEnumerateInstanceExtensionProperties; do
+      if grep -a -q "$sym" /usr/lib/libmali.so 2>/dev/null; then
+        echo "FOUND STRING: $sym"
+      else
+        echo "NO STRING: $sym"
+      fi
+    done
+  fi
+
+  echo "=== direct loader smoke ==="
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - <<'PY'
+import ctypes
+p="/usr/lib/libmali.so"
+try:
+    lib=ctypes.CDLL(p)
+    print("dlopen PASS:", p)
+    for s in ("vkGetInstanceProcAddr","vkCreateInstance","vkEnumerateInstanceExtensionProperties"):
+        try:
+            getattr(lib,s)
+            print("dlsym PASS:", s)
+        except AttributeError:
+            print("dlsym FAIL:", s)
+except OSError as e:
+    print("dlopen FAIL:", e)
+PY
+  else
+    echo "python3 unavailable; skipping true dlopen/dlsym smoke"
   fi
 else
   echo "/usr/lib/libmali.so not found"
