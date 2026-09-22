@@ -35,6 +35,21 @@ echo "=== Vulkan loader ==="
 ldconfig -p 2>/dev/null | grep -i vulkan || true
 find /usr/lib /lib -maxdepth 4 -iname 'libvulkan*.so*' 2>/dev/null | head -40 || true
 
+echo "=== Mali Vulkan exports ==="
+if [ -f /usr/lib/libmali.so ]; then
+  file /usr/lib/libmali.so 2>/dev/null || true
+  ldd /usr/lib/libmali.so 2>/dev/null || true
+  if command -v readelf >/dev/null 2>&1; then
+    readelf -Ws /usr/lib/libmali.so 2>/dev/null | grep -E 'vkGetInstanceProcAddr|vkCreateInstance|vkEnumerateInstance' | head -30 || true
+  elif command -v nm >/dev/null 2>&1; then
+    nm -D /usr/lib/libmali.so 2>/dev/null | grep -E 'vkGetInstanceProcAddr|vkCreateInstance|vkEnumerateInstance' | head -30 || true
+  else
+    echo "readelf/nm unavailable; cannot inspect Vulkan exports"
+  fi
+else
+  echo "/usr/lib/libmali.so not found"
+fi
+
 echo "=== Vulkan ICDs ==="
 for d in /etc/vulkan/icd.d /usr/share/vulkan/icd.d /usr/local/share/vulkan/icd.d; do
   if [ -d "$d" ]; then
