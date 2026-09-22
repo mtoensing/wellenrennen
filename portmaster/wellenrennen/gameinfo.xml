@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<gameList>
+  <game>
+    <path>./Wellenrennen.sh</path>
+    <name>Wellenrennen</name>
+    <desc>Experimental ARM64/PortMaster packaging of Wave Race 64: Recompiled. Requires your own supported Wave Race 64 USA Rev A ROM.</desc>
+    <genre>Racing</genre>
+    <developer>Nintendo EAD / Wave Race 64 Recompiled contributors</developer>
+    <publisher>Nintendo (original game)</publisher>
+  </game>
+</gameList>

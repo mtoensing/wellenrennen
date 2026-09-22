@@ -1,0 +1,20 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -132,9 +132,14 @@ if(WR64_WITH_FRONTEND)
+     elseif(WIN32)
+         set(DXC "${WR64_RT64_DIR}/src/contrib/dxc/bin/x64/dxc.exe")
+     else()
++        if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
++            set(WR64_DXC_ARCH arm64)
++        else()
++            set(WR64_DXC_ARCH x64)
++        endif()
+         set(DXC "${CMAKE_COMMAND}" -E env
+-            "LD_LIBRARY_PATH=${WR64_RT64_DIR}/src/contrib/dxc/lib/x64"
+-            "${WR64_RT64_DIR}/src/contrib/dxc/bin/x64/dxc-linux")
++            "LD_LIBRARY_PATH=${WR64_RT64_DIR}/src/contrib/dxc/lib/${WR64_DXC_ARCH}"
++            "${WR64_RT64_DIR}/src/contrib/dxc/bin/${WR64_DXC_ARCH}/dxc-linux")
+     endif()
+     set(DXC_COMMON_OPTS "-I${WR64_RT64_DIR}/src")
+     set(DXC_DXIL_OPTS "-Wno-ignored-attributes")

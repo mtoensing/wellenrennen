@@ -1,0 +1,26 @@
+name: build-arm64
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - prototype/rg40xx
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04-arm
+    container:
+      image: ubuntu:22.04
+
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            ca-certificates git cmake ninja-build clang python3 \
+            file binutils
+
+      - uses: actions/checkout@v4
+
+      - name: ARM64 ROM-free probe
+        run: ./scripts/build-arm64.sh probe

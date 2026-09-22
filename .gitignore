@@ -1,0 +1,17 @@
+.work/
+dist/
+device-logs/
+*.z64
+*.n64
+*.v64
+*.rom
+RecompiledFuncs/
+reference/
+build/
+build-*/
+wr64.log
+portmaster.log
+smoke.log
+core
+core.*
+.DS_Store

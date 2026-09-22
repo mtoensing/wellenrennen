@@ -1,0 +1,26 @@
+{
+  "version": 4,
+  "name": "wellenrennen.zip",
+  "items": [
+    "Wellenrennen.sh",
+    "wellenrennen/"
+  ],
+  "items_opt": [],
+  "attr": {
+    "title": "Wellenrennen",
+    "porter": ["mtoensing"],
+    "desc": "Experimental aarch64 PortMaster bring-up of Wave Race 64: Recompiled. Requires the user's own supported ROM.",
+    "desc_md": null,
+    "inst": "Copy your own legally obtained Wave Race 64 (USA) (Rev A) .z64 ROM into wellenrennen/. No Nintendo ROM data is included.",
+    "inst_md": null,
+    "genres": ["racing"],
+    "image": null,
+    "rtr": false,
+    "exp": true,
+    "runtime": [],
+    "store": [],
+    "availability": "paid",
+    "reqs": [],
+    "arch": ["aarch64"]
+  }
+}
