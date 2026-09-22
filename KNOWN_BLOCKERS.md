@@ -75,3 +75,42 @@ No RG40XX H performance result exists yet for this port.
 
 Do not claim 60 FPS. First prove that a race sustains the game's native
 approximately 30 Hz simulation rate. Then test RT64 60 FPS presentation.
+
+## 2026-09-22 — RG40XX H/KNULLI graphics probe
+
+Real device:
+
+- Anbernic RG40XX H
+- KNULLI / Batocera 42
+- kernel 4.9.170
+- aarch64
+- 973 MiB RAM
+- no swap
+- proprietary Mali kernel module loaded: `mali_kbase`
+- device node present: `/dev/mali0`
+- aarch64 SDL2 present
+- Vulkan ICD present:
+  `/usr/share/vulkan/icd.d/mali_icd.json`
+- ICD points to:
+  `/usr/lib/libmali.so`
+- ICD reports Vulkan API:
+  `1.0.108`
+- `vulkaninfo` is not installed
+- `libvulkan.so` / `libvulkan.so.1` was not found by the initial probe
+- PortMaster control file:
+  `/userdata/system/.local/share/PortMaster/control.txt`
+
+This is promising: the Mali Vulkan driver is installed. The remaining loader
+question is important because pinned RT64 uses Volk, and pinned Volk calls
+`dlopen("libvulkan.so.1")` then `dlopen("libvulkan.so")` on Linux.
+
+Next device gate:
+
+1. inspect `/usr/lib/libmali.so`
+2. check whether it exports `vkGetInstanceProcAddr`
+3. if yes, prefer the smallest RT64/Volk integration needed to load the existing
+   system Mali driver; do not bundle or replace the Mali driver
+4. if no, locate an existing PortMaster/CFW Vulkan loader solution before
+   considering any bundled loader
+
+Do not interpret the missing `vulkaninfo` command as a Vulkan failure.
