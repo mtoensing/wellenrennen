@@ -23,4 +23,4 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: ARM64 ROM-free probe
-        run: ./scripts/build-arm64.sh probe
+        run: bash ./scripts/build-arm64.sh probe
