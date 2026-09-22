@@ -194,3 +194,34 @@ Rejected for now: a Vulkan-capable Mali blob (Hardkernel RK3326
 behind a Cloudflare browser check, it is a GBM build while this device has no
 `/dev/dri`, and its redistribution terms are unclear. Rockchip's current
 `libmali-bifrost-g31-g24p0-*` exports no `vk*` symbols.
+
+## 2026-09-22 — full aarch64 build boots to the title screen on the device
+
+Build (Docker, Ubuntu 22.04, Clang 18, libstdc++ 12, SDL 2.30.9), proven:
+
+- `generate_game.py` from the verified ROM: all 21 code sections of the
+  assembled ELF match the ROM byte for byte; N64Recomp + RSPRecomp succeed.
+- Fixes needed on Linux/aarch64 (all in `scripts/build-arm64.sh` / `patches/`):
+  SDL >= 2.26 (`SDL_GetWindowSizeInPixels`); missing `<cstddef>`/`<string>`
+  under libstdc++ 12; `SDL2_INCLUDE_DIRS` (upstream only runs
+  `find_package(SDL2)` on Apple); `PLUME_SDL_VULKAN_ENABLED` must be global
+  (RT64 only sets it in its own directory, RecompFrontend then sees plume's
+  X11 `RenderWindow`); `NFD_PORTAL=ON` (no GTK 3 on the CFW);
+  `SDL_WINDOW_VULKAN` on the Linux window (patch 0003; without it
+  `SDL_Vulkan_CreateSurface` fails "The specified window isn't a Vulkan
+  window" and the process segfaults).
+
+Device runs through the real launcher (Westonpack `drm gl kiosk llvmpipe`):
+
+- With the bundled replacement soundtrack the runtime printed
+  `Failed to allocate memory!` (librecomp's 512 MiB RDRAM `mprotect`; device
+  `overcommit_memory=0`, no swap, the soundtrack is decoded fully into RAM).
+  Packaging without `assets/music` and `assets/textures` fixes it.
+- Then: Lavapipe device, RG40XX-H controller detected, audio device opens,
+  game state reaches `TITLE_SCREEN`, original music is audible
+  (`[wr64] audio is audible`).
+- But: `the game is running at 0 frames per second (it asked for 20)`, two
+  cores at 100 %, and `/dev/fb0` shows only a black Xwayland window
+  (with title bar) at 30/60/100 s. No rendered frame proven yet.
+- After that 150 s run was stopped, the device stopped answering ping/SSH
+  for more than 20 minutes. Cause not determined (no logs could be fetched).
