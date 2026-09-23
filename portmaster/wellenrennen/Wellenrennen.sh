@@ -42,11 +42,12 @@ $ESUDO chmod +x "$BIN"
 # Keep settings and saves inside the port directory.
 touch "$GAMEDIR/portable.txt"
 
-# First run: start from the cheapest settings (original water/textures/music,
-# no MSAA, 30 Hz, native resolution). Existing player choices are kept.
+# First run: cheapest settings (original water/textures/music, no MSAA,
+# 30 Hz, native resolution, no rumble). Existing player choices are kept.
 for f in graphics.json sound.json water.json haptics.json; do
   [ -f "$GAMEDIR/$f" ] || cp "$GAMEDIR/defaults/$f" "$GAMEDIR/$f"
 done
+mkdir -p "$GAMEDIR/gliden64"
 
 # See Sternenfuchs: get_controls only puts one unrelated GUID into
 # SDL_GAMECONTROLLERCONFIG, so use the CFW's complete mapping database.
@@ -54,57 +55,18 @@ if [ -f "$controlfolder/${CFW_NAME}/gamecontrollerdb.txt" ]; then
   export SDL_GAMECONTROLLERCONFIG_FILE="$controlfolder/${CFW_NAME}/gamecontrollerdb.txt"
 fi
 
-# RT64 renders only through Vulkan. Mali blobs shipped by these CFWs have no
-# Vulkan, so Vulkan comes from PortMaster's Mesapack (Lavapipe) and the window
-# from Westonpack (Weston + Xwayland, shown through the CFW's own SDL2/GLES).
-runtime_mount() {
-  local name="$1" dir="$2"
-  if [ ! -f "$controlfolder/libs/${name}.squashfs" ]; then
-    if [ ! -f "$controlfolder/harbourmaster" ]; then
-      pm_message "This port requires the latest PortMaster to run, please go to https://portmaster.games/ for more info."
-      sleep 5
-      exit 1
-    fi
-    $ESUDO $controlfolder/harbourmaster --quiet --no-check runtime_check "${name}.squashfs"
-  fi
-  $ESUDO mkdir -p "$dir"
-  if [[ "$PM_CAN_MOUNT" != "N" ]]; then
-    $ESUDO umount "$dir" 2>/dev/null
-  fi
-  $ESUDO mount "$controlfolder/libs/${name}.squashfs" "$dir"
-}
-
-weston_dir=/tmp/weston
-mesa_dir=/tmp/mesa
-runtime_mount weston_pkg_0.2 "$weston_dir"
-runtime_mount mesa_pkg_0.1 "$mesa_dir"
-
 $GPTOKEYB "WaveRace64Recomp.${DEVICE_ARCH}" >/dev/null 2>&1 &
-
 pm_platform_helper "$BIN"
 
-# libs.aarch64 holds only what the runtimes lack: the Khronos Vulkan loader,
-# the xcb extensions Lavapipe links against, and an X11-capable SDL2.
-#
-# westonwrap eval()s the app command line, so anything after the gllib
-# argument must survive a second round of shell parsing: values with spaces
-# (the controller mapping, ROM names like "Wave Race 64 - ...") go into the
-# environment of the whole stack instead, and paths are %q-quoted.
+# The upstream renderer (RT64) needs Vulkan, which these Mali GLES drivers do
+# not have. Render through the bundled GLideN64 plugin on the CFW's own SDL2 +
+# OpenGL ES instead.
 $ESUDO env \
-  VK_ICD_FILENAMES="$mesa_dir/share/vulkan/icd.d/lvp_icd.aarch64.json" \
-  WRAPPED_LIBRARY_PATH="$GAMEDIR/libs.${DEVICE_ARCH}" \
-  WESTON_KIOSK_NO_RESIZE=1 \
-  MESA_SHADER_CACHE_DIR="$GAMEDIR/shadercache" \
-  MESA_SHADER_CACHE_MAX_SIZE=512M \
+  WR64_RENDERER=gliden64 \
+  WR64_GLIDEN64_PLUGIN="$GAMEDIR/gliden64/mupen64plus-video-GLideN64.so" \
+  WR64_GLIDEN64_CORE="$GAMEDIR/gliden64/libwr64_m64pcore.so" \
   SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig" \
   SDL_GAMECONTROLLERCONFIG_FILE="$SDL_GAMECONTROLLERCONFIG_FILE" \
-  $weston_dir/westonwrap.sh drm gl kiosk llvmpipe \
-  WAYLAND_DISPLAY= SDL_VIDEODRIVER=x11 \
-  "$(printf '%q' "$BIN")" "$(printf '%q' "$ROM")"
+  "$BIN" "$ROM"
 
-$ESUDO $weston_dir/westonwrap.sh cleanup
-if [[ "$PM_CAN_MOUNT" != "N" ]]; then
-  $ESUDO umount "$weston_dir"
-  $ESUDO umount "$mesa_dir"
-fi
 pm_finish

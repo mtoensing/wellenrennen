@@ -10,7 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       file binutils-mips-linux-gnu \
       libstdc++-12-dev libgtk-3-dev libdbus-1-dev pkg-config \
       libx11-dev libxrandr-dev libwayland-dev libxkbcommon-dev \
-      libvulkan-dev unzip zip rsync \
+      libvulkan-dev libegl1-mesa-dev libgles2-mesa-dev zlib1g-dev libpng-dev libzstd-dev libfreetype-dev \
+      unzip zip rsync \
  && curl -fsSL https://apt.llvm.org/llvm.sh -o /tmp/llvm.sh \
  && bash /tmp/llvm.sh 18 \
  && ln -sf /usr/bin/clang-18 /usr/local/bin/clang \

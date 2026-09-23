@@ -30,6 +30,13 @@ file "$GAMEDIR/WaveRace64Recomp.aarch64" 2>/dev/null || echo "BLOCKER: binary no
 ls "$GAMEDIR"/*.z64 2>/dev/null || echo "BLOCKER: no ROM in $GAMEDIR"
 
 ES_PID="$(pgrep -f 'exit-on-reboot-required' | head -1)"
+# Run with the environment ports get from EmulationStation (audio needs
+# XDG_RUNTIME_DIR to reach PipeWire; an SSH session does not have it).
+if [ -n "$ES_PID" ]; then
+  while IFS= read -r kv; do
+    case "$kv" in XDG_*|DBUS_*|SDL_*|HOME=*) export "$kv" ;; esac
+  done < <(tr '\0' '\n' < /proc/$ES_PID/environ)
+fi
 resume_es() { [ -n "$ES_PID" ] && kill -CONT "$ES_PID" 2>/dev/null || true; }
 trap resume_es EXIT
 [ -n "$ES_PID" ] && kill -STOP "$ES_PID" 2>/dev/null || true

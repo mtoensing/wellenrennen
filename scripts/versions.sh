@@ -10,3 +10,7 @@ WR64_DECOMP_REPO="https://github.com/LLONSIT/Wave-Race-64.git"
 WR64_DECOMP_COMMIT="a51b38a2aaef68da10ea1e47247e70be3b1d4c70"
 
 WR64_ROM_SHA1="508dfc2d4caa42b6f6de5263d0aed5e44ac7966a"
+
+# OpenGL ES renderer for devices without hardware Vulkan (mupen64plus plugin)
+GLIDEN64_REPO="https://github.com/gonetz/GLideN64.git"
+GLIDEN64_COMMIT="41c7ba273a6c9afb43c0574cf3cf5d139182d070"

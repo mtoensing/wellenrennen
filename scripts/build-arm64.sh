@@ -161,6 +161,32 @@ if [ ! -f RecompiledFuncs/aspMain_rsp.cpp ]; then
   "$VENV/bin/python" tools/generate_game.py "$ROM"
 fi
 
+# --- GLideN64 (OpenGL ES renderer plugin) ---
+# RT64 needs Vulkan; the Mali GLES-only drivers of these CFWs cannot run it.
+GLIDEN64_SRC="$WORK/GLideN64"
+GLIDEN64_BUILD="$WORK/build-gliden64"
+if [ "$(git -C "$GLIDEN64_SRC" rev-parse HEAD 2>/dev/null)" != "$GLIDEN64_COMMIT" ]; then
+  rm -rf "$GLIDEN64_SRC" "$GLIDEN64_BUILD"
+  git clone "$GLIDEN64_REPO" "$GLIDEN64_SRC"
+  git -C "$GLIDEN64_SRC" checkout -q "$GLIDEN64_COMMIT"
+fi
+# Ubuntu 22.04's zstd has no CMake package; GLideN64 only needs the static lib.
+mkdir -p "$WORK/cmake-shims"
+cat > "$WORK/cmake-shims/ZSTDConfig.cmake" <<'ZSTD'
+add_library(zstd::libzstd_static STATIC IMPORTED)
+set_target_properties(zstd::libzstd_static PROPERTIES
+  IMPORTED_LOCATION /usr/lib/aarch64-linux-gnu/libzstd.a
+  INTERFACE_INCLUDE_DIRECTORIES /usr/include)
+ZSTD
+cmake -S "$GLIDEN64_SRC/src" -B "$GLIDEN64_BUILD" -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+  -DCMAKE_C_FLAGS="-mcpu=cortex-a53" -DCMAKE_CXX_FLAGS="-mcpu=cortex-a53" \
+  -DMUPENPLUSAPI=ON -DEGL=ON -DNEON_OPT=ON -DCRC_ARMV8=ON -DNO_OSD=ON \
+  -DUSE_IPO=OFF -DUSE_SYSTEM_LIBS=ON -DZSTD_DIR="$WORK/cmake-shims"
+cmake --build "$GLIDEN64_BUILD"
+cd "$SRC"
+
 # --- the game ---
 # NFD_PORTAL: RT64's file dialog uses xdg-desktop-portal over D-Bus instead of
 # GTK 3, which CFWs do not ship. The port passes the ROM on the command line.
@@ -172,6 +198,7 @@ cmake -S . -B "$BUILD" -G Ninja \
   -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
   -DRT64_SDL_WINDOW_VULKAN=ON \
   -DNFD_PORTAL=ON \
+  -DWR64_GLIDEN64_INCLUDE_DIR="$GLIDEN64_SRC/src/inc" \
   -DCMAKE_C_FLAGS="-DPLUME_SDL_VULKAN_ENABLED" \
   -DCMAKE_CXX_FLAGS="-DPLUME_SDL_VULKAN_ENABLED" \
   -DSDL2_INCLUDE_DIRS="$(sdl2-config --cflags | sed -n 's/.*-I\([^ ]*\).*/\1/p')" \

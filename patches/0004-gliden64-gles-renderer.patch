@@ -1,0 +1,739 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 4f49fd8..c97169f 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -244,7 +244,26 @@ if(WIN32)
+     list(APPEND WR64_SOURCES src/app.rc)
+ endif()
+ 
++# Optional OpenGL ES renderer through the GLideN64 mupen64plus plugin, for
++# devices without hardware Vulkan. Needs the mupen64plus API headers (GLideN64's
++# src/inc) and exports the core API symbols the plugin looks up with dlsym.
++set(WR64_GLIDEN64_INCLUDE_DIR "" CACHE PATH "mupen64plus API headers; enables the GLideN64 renderer")
++if(WR64_GLIDEN64_INCLUDE_DIR AND WR64_WITH_RUNTIME AND WR64_WITH_RECOMPILED AND UNIX AND NOT APPLE)
++    list(APPEND WR64_SOURCES src/gliden64_renderer.cpp)
++    set(WR64_WITH_GLIDEN64 ON)
++endif()
++
+ add_executable(WaveRace64Recomp ${WR64_SOURCES})
++if(WR64_WITH_GLIDEN64)
++    target_compile_definitions(WaveRace64Recomp PRIVATE WR64_WITH_GLIDEN64=1)
++    target_include_directories(WaveRace64Recomp PRIVATE "${WR64_GLIDEN64_INCLUDE_DIR}")
++    target_link_libraries(WaveRace64Recomp PRIVATE ${CMAKE_DL_LIBS})
++
++    add_library(wr64_m64pcore SHARED src/gliden64_core.cpp)
++    target_include_directories(wr64_m64pcore PRIVATE "${WR64_GLIDEN64_INCLUDE_DIR}" ${SDL2_INCLUDE_DIRS})
++    target_link_libraries(wr64_m64pcore PRIVATE SDL2)
++    add_dependencies(WaveRace64Recomp wr64_m64pcore)
++endif()
+ set_property(SOURCE src/water.cpp APPEND PROPERTY OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/assets/water/profiles.json")
+ 
+ if(APPLE)
+diff --git a/include/wr64/renderer.h b/include/wr64/renderer.h
+index 01d00ea..f1aeb1c 100644
+--- a/include/wr64/renderer.h
++++ b/include/wr64/renderer.h
+@@ -44,6 +44,12 @@ private:
+     uint32_t mi_intr_reg_ = 0;
+ };
+ 
++// WR64_RENDERER=gliden64: render through the GLideN64 mupen64plus plugin on
++// OpenGL ES instead of RT64 (see src/gliden64_renderer.cpp).
++bool use_gliden64();
++std::unique_ptr<ultramodern::renderer::RendererContext> create_gliden64_render_context(
++    uint8_t* rdram, ultramodern::renderer::WindowHandle window_handle, bool developer_mode);
++
+ // Handed to ultramodern as renderer_callbacks.create_render_context.
+ std::unique_ptr<ultramodern::renderer::RendererContext> create_render_context(
+     uint8_t* rdram, ultramodern::renderer::WindowHandle window_handle, bool developer_mode);
+diff --git a/src/callbacks.cpp b/src/callbacks.cpp
+index e38bea3..352ac04 100644
+--- a/src/callbacks.cpp
++++ b/src/callbacks.cpp
+@@ -799,7 +799,11 @@ ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::
+ #elif defined(__linux__)
+     // RT64 is built with RT64_SDL_WINDOW_VULKAN on Linux and creates its
+     // surface with SDL_Vulkan_CreateSurface, which needs a Vulkan window.
++#if WR64_WITH_GLIDEN64
++    flags |= wr64::use_gliden64() ? SDL_WINDOW_OPENGL : SDL_WINDOW_VULKAN;
++#else
+     flags |= SDL_WINDOW_VULKAN;
++#endif
+ #endif
+ 
+     SDL_Rect display{};
+diff --git a/src/frontend.cpp b/src/frontend.cpp
+index 850ca67..ae421f4 100644
+--- a/src/frontend.cpp
++++ b/src/frontend.cpp
+@@ -9,6 +9,7 @@
+ // game this is, what the menu entries should say, and a stylesheet.
+ 
+ #include "wr64/frontend.h"
++#include "wr64/renderer.h"
+ 
+ #include <cstdio>
+ #include <cstdlib>
+@@ -215,6 +216,15 @@ void init(bool auto_start) {
+     recompui::register_primary_font("LatoLatin-Regular.ttf", "LatoLatin");
+ 
+     recompui::register_launcher_init_callback(build_launcher);
++#if WR64_WITH_GLIDEN64
++    if (auto_start && wr64::use_gliden64()) {
++        // The launcher is drawn through RT64, which the GLideN64 renderer
++        // replaces, so its update callback never runs: start directly.
++        recompui::update_game_mod_id(wr64::kModGameId);
++        recomp::start_game(std::u8string{wr64::kGameId}, {});
++        auto_start = false;
++    }
++#endif
+     if (auto_start) {
+         // Start after the launcher exists, on its UI update boundary. Starting
+         // before context creation leaves an invisible menu capturing the pad.
+diff --git a/src/gliden64_core.cpp b/src/gliden64_core.cpp
+new file mode 100644
+index 0000000..590a6c0
+--- /dev/null
++++ b/src/gliden64_core.cpp
+@@ -0,0 +1,315 @@
++// The mupen64plus core API (Config* and VidExt_*) that the GLideN64 plugin
++// resolves with dlsym on the "core" handle it gets in PluginStartup.
++//
++// This is its own shared library, loaded RTLD_LOCAL by gliden64_renderer.cpp.
++// It cannot live in the executable: GLideN64 keeps global function-pointer
++// variables with exactly these names, and exported executable symbols would
++// interpose them -- the plugin's first write to its "ConfigOpenSection"
++// variable then lands in our read-only code.
++
++#include <SDL.h>
++
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <fstream>
++#include <map>
++#include <string>
++#include <variant>
++
++#define M64P_CORE_PROTOTYPES
++#include "m64p_types.h"
++#include "m64p_plugin.h"
++
++namespace {
++
++// ---------------------------------------------------------------------------
++//  Config API
++// ---------------------------------------------------------------------------
++
++using Value = std::variant<int, float, bool, std::string>;
++using Section = std::map<std::string, Value>;
++
++std::map<std::string, Section>& sections() {
++    static std::map<std::string, Section> s;
++    return s;
++}
++
++// Settings the port wants regardless of GLideN64's defaults. Anything in
++// gliden64.ini (next to the executable, "[Section]" + "key = value") wins.
++void load_overrides() {
++    static bool loaded = false;
++    if (loaded) {
++        return;
++    }
++    loaded = true;
++    std::ifstream in("gliden64.ini");
++    std::string line;
++    std::string section = "Video-GLideN64";
++    while (std::getline(in, line)) {
++        const auto trim = [](std::string s) {
++            const auto b = s.find_first_not_of(" \t\r");
++            const auto e = s.find_last_not_of(" \t\r");
++            return b == std::string::npos ? std::string{} : s.substr(b, e - b + 1);
++        };
++        line = trim(line);
++        if (line.empty() || line[0] == '#' || line[0] == ';') {
++            continue;
++        }
++        if (line.front() == '[' && line.back() == ']') {
++            section = line.substr(1, line.size() - 2);
++            continue;
++        }
++        const auto eq = line.find('=');
++        if (eq == std::string::npos) {
++            continue;
++        }
++        // Stored as strings; the typed getters convert on read.
++        sections()[section][trim(line.substr(0, eq))] = trim(line.substr(eq + 1));
++    }
++}
++
++Section* section_of(m64p_handle handle) {
++    return static_cast<Section*>(handle);
++}
++
++int as_int(const Value& v) {
++    if (auto p = std::get_if<int>(&v)) return *p;
++    if (auto p = std::get_if<float>(&v)) return static_cast<int>(*p);
++    if (auto p = std::get_if<bool>(&v)) return *p ? 1 : 0;
++    const std::string& s = std::get<std::string>(v);
++    if (s == "True" || s == "true") return 1;
++    if (s == "False" || s == "false") return 0;
++    return std::atoi(s.c_str());
++}
++
++float as_float(const Value& v) {
++    if (auto p = std::get_if<float>(&v)) return *p;
++    if (auto p = std::get_if<std::string>(&v)) return static_cast<float>(std::atof(p->c_str()));
++    return static_cast<float>(as_int(v));
++}
++
++std::string& string_slot(Section& section, const char* name) {
++    Value& v = section[name];
++    if (!std::holds_alternative<std::string>(v)) {
++        v = std::string{};
++    }
++    return std::get<std::string>(v);
++}
++
++// GLideN64's shader storage and logs, relative to the executable directory
++// the frontend changes into.
++const char* data_dir() {
++    return "gliden64";
++}
++
++// ---------------------------------------------------------------------------
++//  Video extension
++// ---------------------------------------------------------------------------
++
++SDL_Window* g_window = nullptr;
++SDL_GLContext g_gl = nullptr;
++int g_swap_interval = 0;
++
++}  // namespace
++
++extern "C" {
++
++__attribute__((visibility("default"))) m64p_error PluginGetVersion(
++        m64p_plugin_type* type, int* version, int* api_version, const char** name, int* caps) {
++    if (type) *type = M64PLUGIN_CORE;
++    if (version) *version = 0x020600;
++    if (api_version) *api_version = 0x020001;
++    if (name) *name = "Wave Race 64: Recompiled";
++    if (caps) *caps = 0;
++    return M64ERR_SUCCESS;
++}
++
++__attribute__((visibility("default"))) m64p_error ConfigOpenSection(const char* name, m64p_handle* handle) {
++    load_overrides();
++    *handle = &sections()[name];
++    return M64ERR_SUCCESS;
++}
++
++__attribute__((visibility("default"))) m64p_error ConfigDeleteSection(const char* name) {
++    sections().erase(name);
++    return M64ERR_SUCCESS;
++}
++
++__attribute__((visibility("default"))) m64p_error ConfigSaveSection(const char*) { return M64ERR_SUCCESS; }
++__attribute__((visibility("default"))) m64p_error ConfigSaveFile(void) { return M64ERR_SUCCESS; }
++
++__attribute__((visibility("default"))) m64p_error ConfigSetDefaultInt(m64p_handle h, const char* n, int v, const char*) {
++    section_of(h)->emplace(n, v);
++    return M64ERR_SUCCESS;
++}
++__attribute__((visibility("default"))) m64p_error ConfigSetDefaultFloat(m64p_handle h, const char* n, float v, const char*) {
++    section_of(h)->emplace(n, v);
++    return M64ERR_SUCCESS;
++}
++__attribute__((visibility("default"))) m64p_error ConfigSetDefaultBool(m64p_handle h, const char* n, int v, const char*) {
++    section_of(h)->emplace(n, v != 0);
++    return M64ERR_SUCCESS;
++}
++__attribute__((visibility("default"))) m64p_error ConfigSetDefaultString(m64p_handle h, const char* n, const char* v, const char*) {
++    section_of(h)->emplace(n, std::string{v});
++    return M64ERR_SUCCESS;
++}
++
++__attribute__((visibility("default"))) int ConfigGetParamInt(m64p_handle h, const char* n) {
++    auto it = section_of(h)->find(n);
++    return it == section_of(h)->end() ? 0 : as_int(it->second);
++}
++__attribute__((visibility("default"))) float ConfigGetParamFloat(m64p_handle h, const char* n) {
++    auto it = section_of(h)->find(n);
++    return it == section_of(h)->end() ? 0.0f : as_float(it->second);
++}
++__attribute__((visibility("default"))) int ConfigGetParamBool(m64p_handle h, const char* n) {
++    return ConfigGetParamInt(h, n) != 0;
++}
++__attribute__((visibility("default"))) const char* ConfigGetParamString(m64p_handle h, const char* n) {
++    return string_slot(*section_of(h), n).c_str();
++}
++
++__attribute__((visibility("default"))) m64p_error ConfigSetParameter(m64p_handle h, const char* n, m64p_type t, const void* v) {
++    Section& s = *section_of(h);
++    switch (t) {
++        case M64TYPE_INT:    s[n] = *static_cast<const int*>(v); break;
++        case M64TYPE_FLOAT:  s[n] = *static_cast<const float*>(v); break;
++        case M64TYPE_BOOL:   s[n] = *static_cast<const int*>(v) != 0; break;
++        case M64TYPE_STRING: s[n] = std::string{static_cast<const char*>(v)}; break;
++    }
++    return M64ERR_SUCCESS;
++}
++
++__attribute__((visibility("default"))) m64p_error ConfigGetParameter(m64p_handle h, const char* n, m64p_type t, void* out, int size) {
++    Section& s = *section_of(h);
++    auto it = s.find(n);
++    if (it == s.end()) return M64ERR_INPUT_NOT_FOUND;
++    switch (t) {
++        case M64TYPE_INT:   *static_cast<int*>(out) = as_int(it->second); break;
++        case M64TYPE_FLOAT: *static_cast<float*>(out) = as_float(it->second); break;
++        case M64TYPE_BOOL:  *static_cast<int*>(out) = as_int(it->second) != 0; break;
++        case M64TYPE_STRING:
++            std::snprintf(static_cast<char*>(out), size, "%s", string_slot(s, n).c_str());
++            break;
++    }
++    return M64ERR_SUCCESS;
++}
++
++__attribute__((visibility("default"))) const char* ConfigGetSharedDataFilepath(const char* file) {
++    static std::string path;
++    path = std::string(data_dir()) + "/" + file;
++    return path.c_str();
++}
++__attribute__((visibility("default"))) const char* ConfigGetUserConfigPath(void) { return data_dir(); }
++__attribute__((visibility("default"))) const char* ConfigGetUserDataPath(void) { return data_dir(); }
++__attribute__((visibility("default"))) const char* ConfigGetUserCachePath(void) { return data_dir(); }
++
++__attribute__((visibility("default"))) m64p_error ConfigExternalOpen(const char*, m64p_handle*) { return M64ERR_FILES; }
++__attribute__((visibility("default"))) m64p_error ConfigExternalGetParameter(m64p_handle, const char*, const char*, char*, int) { return M64ERR_INPUT_NOT_FOUND; }
++__attribute__((visibility("default"))) m64p_error ConfigExternalClose(m64p_handle) { return M64ERR_SUCCESS; }
++
++__attribute__((visibility("default"))) m64p_error VidExt_Init(void) { return M64ERR_SUCCESS; }
++
++__attribute__((visibility("default"))) m64p_error VidExt_Quit(void) {
++    if (g_gl != nullptr) {
++        SDL_GL_MakeCurrent(g_window, nullptr);
++        SDL_GL_DeleteContext(g_gl);
++        g_gl = nullptr;
++    }
++    return M64ERR_SUCCESS;
++}
++
++__attribute__((visibility("default"))) m64p_error VidExt_ListFullscreenModes(m64p_2d_size*, int*) { return M64ERR_UNSUPPORTED; }
++__attribute__((visibility("default"))) m64p_error VidExt_ListFullscreenRates(m64p_2d_size, int*, int*) { return M64ERR_UNSUPPORTED; }
++
++__attribute__((visibility("default"))) m64p_error VidExt_SetVideoMode(int, int, int, m64p_video_mode, m64p_video_flags) {
++    if (g_window == nullptr) {
++        return M64ERR_NOT_INIT;
++    }
++    if (g_gl == nullptr) {
++        // GLideN64 asks for a desktop core profile; the mupen64plus core maps
++        // that to OpenGL ES in its GLES builds, and so do we. GLideN64 detects
++        // ES from GL_VERSION and takes its GLES paths.
++        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
++        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
++        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
++        g_gl = SDL_GL_CreateContext(g_window);
++        if (g_gl == nullptr) {
++            std::fprintf(stderr, "[gliden64] SDL_GL_CreateContext failed: %s\n", SDL_GetError());
++            return M64ERR_SYSTEM_FAIL;
++        }
++        std::fprintf(stderr, "[gliden64] GL context: %s / %s\n",
++                     reinterpret_cast<const char*>(reinterpret_cast<const unsigned char* (*)(unsigned)>(
++                         SDL_GL_GetProcAddress("glGetString"))(0x1F02 /* GL_VERSION */)),
++                     reinterpret_cast<const char*>(reinterpret_cast<const unsigned char* (*)(unsigned)>(
++                         SDL_GL_GetProcAddress("glGetString"))(0x1F01 /* GL_RENDERER */)));
++    }
++    SDL_GL_MakeCurrent(g_window, g_gl);
++    SDL_GL_SetSwapInterval(g_swap_interval);
++    return M64ERR_SUCCESS;
++}
++
++__attribute__((visibility("default"))) m64p_error VidExt_SetVideoModeWithRate(int w, int h, int, int bpp, m64p_video_mode m, m64p_video_flags f) {
++    return VidExt_SetVideoMode(w, h, bpp, m, f);
++}
++
++__attribute__((visibility("default"))) m64p_error VidExt_ResizeWindow(int, int) { return M64ERR_SUCCESS; }
++__attribute__((visibility("default"))) m64p_error VidExt_SetCaption(const char*) { return M64ERR_SUCCESS; }
++__attribute__((visibility("default"))) m64p_error VidExt_ToggleFullScreen(void) { return M64ERR_SUCCESS; }
++
++__attribute__((visibility("default"))) m64p_function VidExt_GL_GetProcAddress(const char* name) {
++    return reinterpret_cast<m64p_function>(SDL_GL_GetProcAddress(name));
++}
++
++__attribute__((visibility("default"))) m64p_error VidExt_GL_SetAttribute(m64p_GLattr attr, int value) {
++    switch (attr) {
++        case M64P_GL_DOUBLEBUFFER:       SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, value); break;
++        case M64P_GL_BUFFER_SIZE:        SDL_GL_SetAttribute(SDL_GL_BUFFER_SIZE, value); break;
++        case M64P_GL_DEPTH_SIZE:         SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, value); break;
++        case M64P_GL_RED_SIZE:           SDL_GL_SetAttribute(SDL_GL_RED_SIZE, value); break;
++        case M64P_GL_GREEN_SIZE:         SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, value); break;
++        case M64P_GL_BLUE_SIZE:          SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, value); break;
++        case M64P_GL_ALPHA_SIZE:         SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, value); break;
++        case M64P_GL_MULTISAMPLEBUFFERS: SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, value); break;
++        case M64P_GL_MULTISAMPLESAMPLES: SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, value); break;
++        case M64P_GL_SWAP_CONTROL:       g_swap_interval = value; break;
++        default: break;  // profile/version: see VidExt_SetVideoMode
++    }
++    return M64ERR_SUCCESS;
++}
++
++__attribute__((visibility("default"))) m64p_error VidExt_GL_GetAttribute(m64p_GLattr attr, int* value) {
++    SDL_GLattr sdl;
++    switch (attr) {
++        case M64P_GL_DOUBLEBUFFER: sdl = SDL_GL_DOUBLEBUFFER; break;
++        case M64P_GL_BUFFER_SIZE:  sdl = SDL_GL_BUFFER_SIZE; break;
++        case M64P_GL_DEPTH_SIZE:   sdl = SDL_GL_DEPTH_SIZE; break;
++        case M64P_GL_RED_SIZE:     sdl = SDL_GL_RED_SIZE; break;
++        case M64P_GL_GREEN_SIZE:   sdl = SDL_GL_GREEN_SIZE; break;
++        case M64P_GL_BLUE_SIZE:    sdl = SDL_GL_BLUE_SIZE; break;
++        case M64P_GL_ALPHA_SIZE:   sdl = SDL_GL_ALPHA_SIZE; break;
++        case M64P_GL_SWAP_CONTROL: *value = SDL_GL_GetSwapInterval(); return M64ERR_SUCCESS;
++        case M64P_GL_MULTISAMPLEBUFFERS: sdl = SDL_GL_MULTISAMPLEBUFFERS; break;
++        case M64P_GL_MULTISAMPLESAMPLES: sdl = SDL_GL_MULTISAMPLESAMPLES; break;
++        case M64P_GL_CONTEXT_MAJOR_VERSION: sdl = SDL_GL_CONTEXT_MAJOR_VERSION; break;
++        case M64P_GL_CONTEXT_MINOR_VERSION: sdl = SDL_GL_CONTEXT_MINOR_VERSION; break;
++        case M64P_GL_CONTEXT_PROFILE_MASK:  sdl = SDL_GL_CONTEXT_PROFILE_MASK; break;
++        default: return M64ERR_INPUT_INVALID;
++    }
++    return SDL_GL_GetAttribute(sdl, value) == 0 ? M64ERR_SUCCESS : M64ERR_SYSTEM_FAIL;
++}
++
++__attribute__((visibility("default"))) m64p_error VidExt_GL_SwapBuffers(void) {
++    SDL_GL_SwapWindow(g_window);
++    return M64ERR_SUCCESS;
++}
++
++__attribute__((visibility("default"))) uint32_t VidExt_GL_GetDefaultFramebuffer(void) { return 0; }
++
++}  // extern "C"
++
++extern "C" __attribute__((visibility("default"))) void wr64_core_set_window(SDL_Window* window) {
++    g_window = window;
++}
+diff --git a/src/gliden64_renderer.cpp b/src/gliden64_renderer.cpp
+new file mode 100644
+index 0000000..2d06bd9
+--- /dev/null
++++ b/src/gliden64_renderer.cpp
+@@ -0,0 +1,304 @@
++// GLideN64-backed renderer context (OpenGL ES), selected with
++// WR64_RENDERER=gliden64.
++//
++// RT64 needs Vulkan. Handhelds whose Mali driver only provides OpenGL ES (for
++// example the H700 devices under KNULLI) cannot run it in hardware, and
++// software Vulkan is far too slow there. GLideN64 is a mupen64plus video
++// plugin with a mature GLES 3 path, so this context loads it with dlopen and
++// plays the part of the mupen64plus core for it:
++//
++//   - the GFX_INFO hardware pointers (RDRAM, DMEM, VI registers) it renders
++//     from, the same storage RT64Context hands to RT64;
++//   - the Config* API, as an in-memory store seeded from gliden64.ini;
++//   - the VidExt_* API, as an OpenGL ES context on the game's SDL window.
++//
++// GLideN64 resolves those core functions with dlsym on the handle passed to
++// PluginStartup; they live in libwr64_m64pcore.so (src/gliden64_core.cpp),
++// loaded RTLD_LOCAL, for the reason given there.
++//
++// Everything runs on ultramodern's gfx thread: the context is created there,
++// and send_dl/update_screen are called there, which is also where the GL
++// context is current.
++
++#include "wr64/renderer.h"
++
++#include <SDL.h>
++#include <dlfcn.h>
++
++#include <array>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <string>
++#include <type_traits>
++
++#include "m64p_types.h"
++#include "m64p_plugin.h"
++
++namespace {
++
++using set_window_t = void (*)(SDL_Window*);
++
++}  // namespace
++
++namespace {
++
++constexpr uint32_t physical(uint32_t vaddr) {
++    return vaddr & 0x00FFFFFFu;
++}
++
++void no_interrupts() {}
++
++void debug_callback(void*, int level, const char* message) {
++    if (level <= M64MSG_WARNING || std::getenv("WR64_GLIDEN64_VERBOSE") != nullptr) {
++        std::fprintf(stderr, "[gliden64] %s\n", message);
++    }
++}
++
++// The plugin's exported entry points.
++struct Plugin {
++    void* handle = nullptr;
++    m64p_error (*PluginStartup)(m64p_dynlib_handle, void*, void (*)(void*, int, const char*)) = nullptr;
++    m64p_error (*PluginShutdown)() = nullptr;
++    int (*InitiateGFX)(GFX_INFO) = nullptr;
++    int (*RomOpen)() = nullptr;
++    void (*RomClosed)() = nullptr;
++    void (*ProcessDList)() = nullptr;
++    void (*UpdateScreen)() = nullptr;
++    void (*ViStatusChanged)() = nullptr;
++    void (*ViWidthChanged)() = nullptr;
++
++    bool load(const char* path) {
++        handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
++        if (handle == nullptr) {
++            std::fprintf(stderr, "[gliden64] dlopen(%s) failed: %s\n", path, dlerror());
++            return false;
++        }
++        bool ok = true;
++        auto get = [&](auto& fn, const char* name) {
++            fn = reinterpret_cast<std::remove_reference_t<decltype(fn)>>(dlsym(handle, name));
++            if (fn == nullptr) {
++                std::fprintf(stderr, "[gliden64] missing export %s\n", name);
++                ok = false;
++            }
++        };
++        get(PluginStartup, "PluginStartup");
++        get(PluginShutdown, "PluginShutdown");
++        get(InitiateGFX, "InitiateGFX");
++        get(RomOpen, "RomOpen");
++        get(RomClosed, "RomClosed");
++        get(ProcessDList, "ProcessDList");
++        get(UpdateScreen, "UpdateScreen");
++        get(ViStatusChanged, "ViStatusChanged");
++        get(ViWidthChanged, "ViWidthChanged");
++        return ok;
++    }
++};
++
++class GLideN64Context final : public ultramodern::renderer::RendererContext {
++public:
++    GLideN64Context(uint8_t* rdram, ultramodern::renderer::WindowHandle window_handle) {
++        setup_result = ultramodern::renderer::SetupResult::GraphicsDeviceNotFound;
++        chosen_api = ultramodern::renderer::GraphicsApi::Auto;
++        const char* core_path = std::getenv("WR64_GLIDEN64_CORE");
++        void* core = dlopen(core_path != nullptr ? core_path : "libwr64_m64pcore.so", RTLD_NOW | RTLD_LOCAL);
++        auto set_window = core != nullptr
++            ? reinterpret_cast<set_window_t>(dlsym(core, "wr64_core_set_window")) : nullptr;
++        if (set_window == nullptr) {
++            std::fprintf(stderr, "[gliden64] cannot load the core API library: %s\n", dlerror());
++            setup_result = ultramodern::renderer::SetupResult::DynamicLibrariesNotFound;
++            return;
++        }
++        set_window(window_handle);
++
++        const char* path = std::getenv("WR64_GLIDEN64_PLUGIN");
++        if (!plugin_.load(path != nullptr ? path : "mupen64plus-video-GLideN64.so")) {
++            setup_result = ultramodern::renderer::SetupResult::DynamicLibrariesNotFound;
++            return;
++        }
++        if (plugin_.PluginStartup(core, nullptr, debug_callback) != M64ERR_SUCCESS) {
++            std::fprintf(stderr, "[gliden64] PluginStartup failed\n");
++            return;
++        }
++
++        // The ROM header GLideN64 reads for the game name and its per-game
++        // settings. mupen64plus keeps the ROM as native-endian 32-bit words,
++        // hence the ^3 in GLideN64's name lookup; build it the same way. Only
++        // the fields GLideN64 uses are filled: CRC1/CRC2 and the name.
++        const uint32_t words[] = {
++            0x80371240, 0x0000000F, 0x80000400, 0x0000144C,
++            0x492F4B61, 0x04E5146A, 0x00000000, 0x00000000,
++            0x57415645, 0x20524143, 0x45203634, 0x20202020, // "WAVE RACE 64    "
++            0x20202020, 0x00000000, 0x0000004E, 0x57524501, // "    ", "NWR" E rev 1
++        };
++        std::memcpy(header_.data(), words, sizeof(words));
++
++        ultramodern::renderer::ViRegs* vi = ultramodern::renderer::get_vi_regs();
++        GFX_INFO info{};
++        info.HEADER = header_.data();
++        info.RDRAM = rdram;
++        info.DMEM = dmem_.data();
++        info.IMEM = imem_.data();
++        info.MI_INTR_REG = &mi_intr_reg_;
++        info.DPC_START_REG = &dpc_regs_[0];
++        info.DPC_END_REG = &dpc_regs_[1];
++        info.DPC_CURRENT_REG = &dpc_regs_[2];
++        info.DPC_STATUS_REG = &dpc_regs_[3];
++        info.DPC_CLOCK_REG = &dpc_regs_[4];
++        info.DPC_BUFBUSY_REG = &dpc_regs_[5];
++        info.DPC_PIPEBUSY_REG = &dpc_regs_[6];
++        info.DPC_TMEM_REG = &dpc_regs_[7];
++        info.VI_STATUS_REG = &vi->VI_STATUS_REG;
++        info.VI_ORIGIN_REG = &vi->VI_ORIGIN_REG;
++        info.VI_WIDTH_REG = &vi->VI_WIDTH_REG;
++        info.VI_INTR_REG = &vi->VI_INTR_REG;
++        info.VI_V_CURRENT_LINE_REG = &vi->VI_V_CURRENT_LINE_REG;
++        info.VI_TIMING_REG = &vi->VI_TIMING_REG;
++        info.VI_V_SYNC_REG = &vi->VI_V_SYNC_REG;
++        info.VI_H_SYNC_REG = &vi->VI_H_SYNC_REG;
++        info.VI_LEAP_REG = &vi->VI_LEAP_REG;
++        info.VI_H_START_REG = &vi->VI_H_START_REG;
++        info.VI_V_START_REG = &vi->VI_V_START_REG;
++        info.VI_V_BURST_REG = &vi->VI_V_BURST_REG;
++        info.VI_X_SCALE_REG = &vi->VI_X_SCALE_REG;
++        info.VI_Y_SCALE_REG = &vi->VI_Y_SCALE_REG;
++        info.CheckInterrupts = no_interrupts;
++        info.version = 2;
++        info.SP_STATUS_REG = &sp_status_reg_;
++        info.RDRAM_SIZE = &rdram_size_;
++
++        if (!plugin_.InitiateGFX(info)) {
++            std::fprintf(stderr, "[gliden64] InitiateGFX failed\n");
++            return;
++        }
++        if (!plugin_.RomOpen()) {
++            std::fprintf(stderr, "[gliden64] RomOpen failed\n");
++            return;
++        }
++        vi_ = vi;
++        valid_ = true;
++        setup_result = ultramodern::renderer::SetupResult::Success;
++        std::fprintf(stderr, "[gliden64] renderer ready\n");
++    }
++
++    bool valid() override { return valid_; }
++
++    bool update_config(const ultramodern::renderer::GraphicsConfig&,
++                       const ultramodern::renderer::GraphicsConfig&) override {
++        return valid_;
++    }
++
++    void enable_instant_present() override {}
++
++    void send_dl(const OSTask* task) override {
++        if (!valid_) {
++            return;
++        }
++        notice_vi_changes();
++
++        // GLideN64 reads the task from the end of DMEM, as the RSP would have
++        // it, as native-endian words at 0xFC0 (OSTask layout).
++        const auto w = [](auto v) { return static_cast<uint32_t>(v); };
++        const uint32_t fields[16] = {
++            w(task->t.type), w(task->t.flags),
++            physical(w(task->t.ucode_boot)), w(task->t.ucode_boot_size),
++            physical(w(task->t.ucode)), w(task->t.ucode_size),
++            physical(w(task->t.ucode_data)), w(task->t.ucode_data_size),
++            physical(w(task->t.dram_stack)), w(task->t.dram_stack_size),
++            physical(w(task->t.output_buff)), w(task->t.output_buff_size),
++            physical(w(task->t.data_ptr)), w(task->t.data_size),
++            physical(w(task->t.yield_data_ptr)), w(task->t.yield_data_size),
++        };
++        std::memcpy(dmem_.data() + 0xFC0, fields, sizeof(fields));
++        sp_status_reg_ = 0x0203;  // HALT | BROKE | TASKDONE, as the RSP plugin sets it
++
++        static uint64_t count = 0;
++        if (count == 0) {
++            std::fprintf(stderr, "[gliden64] first display list 0x%08X\n", fields[12]);
++        }
++        ++count;
++        plugin_.ProcessDList();
++    }
++
++    void send_dummy_workload(uint32_t) override {}
++
++    void update_screen() override {
++        if (!valid_) {
++            return;
++        }
++        notice_vi_changes();
++        plugin_.UpdateScreen();
++
++        // Frame pacing report: rendered frames per second, every 5 s.
++        ++frames_;
++        const uint64_t now = SDL_GetTicks64();
++        if (report_at_ == 0) {
++            report_at_ = now + 5000;
++        } else if (now >= report_at_) {
++            std::fprintf(stderr, "[gliden64] %.1f screen updates/s\n",
++                         frames_ * 1000.0 / (now - report_at_ + 5000));
++            frames_ = 0;
++            report_at_ = now + 5000;
++        }
++    }
++
++    void shutdown() override {
++        if (valid_) {
++            plugin_.RomClosed();
++            plugin_.PluginShutdown();
++            valid_ = false;
++        }
++    }
++
++    uint32_t get_display_framerate() const override { return 60; }
++    float get_resolution_scale() const override { return 1.0f; }
++
++private:
++    // mupen64plus calls these when the game writes the registers; ultramodern
++    // has no such hook, so compare before each use.
++    void notice_vi_changes() {
++        if (vi_->VI_STATUS_REG != last_status_) {
++            last_status_ = vi_->VI_STATUS_REG;
++            plugin_.ViStatusChanged();
++        }
++        if (vi_->VI_WIDTH_REG != last_width_) {
++            last_width_ = vi_->VI_WIDTH_REG;
++            plugin_.ViWidthChanged();
++        }
++    }
++
++    Plugin plugin_;
++    bool valid_ = false;
++    ultramodern::renderer::ViRegs* vi_ = nullptr;
++    uint32_t last_status_ = 0xFFFFFFFF;
++    uint32_t last_width_ = 0xFFFFFFFF;
++    uint64_t frames_ = 0;
++    uint64_t report_at_ = 0;
++
++    std::array<uint8_t, 0x40> header_{};
++    std::array<uint8_t, 0x1000> dmem_{};
++    std::array<uint8_t, 0x1000> imem_{};
++    std::array<uint32_t, 8> dpc_regs_{};
++    uint32_t mi_intr_reg_ = 0;
++    uint32_t sp_status_reg_ = 0;
++    const uint32_t rdram_size_ = 0x800000;
++};
++
++}  // namespace
++
++namespace wr64 {
++
++bool use_gliden64() {
++    static const bool use = [] {
++        const char* v = std::getenv("WR64_RENDERER");
++        return v != nullptr && std::strcmp(v, "gliden64") == 0;
++    }();
++    return use;
++}
++
++std::unique_ptr<ultramodern::renderer::RendererContext> create_gliden64_render_context(
++        uint8_t* rdram, ultramodern::renderer::WindowHandle window_handle, bool) {
++    return std::make_unique<GLideN64Context>(rdram, window_handle);
++}
++
++}  // namespace wr64
+diff --git a/src/main.cpp b/src/main.cpp
+index 9ba13a2..a98ebe3 100644
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -333,6 +333,11 @@ int run(int argc, char** argv, const char* rom_arg) {
+     config.renderer_callbacks = wr64::frontend::renderer_callbacks();
+ #else
+     config.renderer_callbacks = wr64::renderer_callbacks();
++#endif
++#if WR64_WITH_GLIDEN64
++    if (wr64::use_gliden64()) {
++        config.renderer_callbacks = ultramodern::renderer::callbacks_t{wr64::create_gliden64_render_context};
++    }
+ #endif
+     config.audio_callbacks = wr64::audio_callbacks();
+     config.input_callbacks = wr64::input_callbacks();

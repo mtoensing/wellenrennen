@@ -225,3 +225,33 @@ Device runs through the real launcher (Westonpack `drm gl kiosk llvmpipe`):
   (with title bar) at 30/60/100 s. No rendered frame proven yet.
 - After that 150 s run was stopped, the device stopped answering ping/SSH
   for more than 20 minutes. Cause not determined (no logs could be fetched).
+
+## 2026-09-23 — RT64 on Lavapipe never presents; GLideN64 on GLES works
+
+- RT64 blocks every frame on `shaderUber->waitForPipelineCreation()`
+  (`hle/rt64_state.cpp`) until eight ubershader pipelines are compiled.
+  Under Lavapipe on 4x A53 this did not finish in 15 minutes (six
+  `Gfx_Thread` compile threads + four `llvmpipe` threads busy, black screen,
+  `the game is running at 0 frames per second`). Software Vulkan is not a
+  viable path on this device. No PortMaster port uses RT64 or Lavapipe;
+  N64 ports there (Ship of Harkinian, 2Ship2Harkinian, Starship) render with
+  GL/GLES.
+- Replacement renderer (patch 0004): GLideN64 (pinned in `versions.sh`),
+  built as its mupen64plus plugin with `-DEGL=ON -DUSE_SYSTEM_LIBS=ON`,
+  driven by a `GLideN64Context` implementing ultramodern's `RendererContext`
+  and selected with `WR64_RENDERER=gliden64`. The mupen64plus core API it
+  needs (Config*, VidExt_*) lives in `libwr64_m64pcore.so`, loaded
+  `RTLD_LOCAL`: exporting those names from the executable crashed, because
+  GLideN64 has global function-pointer variables with the same names and the
+  executable's symbols interposed them (SIGSEGV in `PluginStartup` storing
+  into our read-only text).
+- The RecompFrontend launcher only runs its auto-start callback from its
+  RT64-drawn UI; in GLideN64 mode the game is started directly.
+- Result on the RG40XX H through the real launcher, with KNULLI's own SDL2
+  (mali video driver) and no Westonpack/Mesapack: `OpenGL ES 3.2 ... Mali-G31`,
+  `renderer ready`, audio open and audible, state `TITLE_SCREEN`, 59.7 screen
+  updates/s, title screen visible in `/dev/fb0`
+  (`docs/evidence/2026-09-23-title-screen-gliden64-gles.png`).
+- Audio over SSH needs EmulationStation's environment (`XDG_RUNTIME_DIR=/var/run`);
+  without it SDL's ALSA open fails with "Host is down". The smoke script
+  imports it; a launch from the Ports menu already has it.
