@@ -42,6 +42,12 @@ $ESUDO chmod +x "$BIN"
 # Keep settings and saves inside the port directory.
 touch "$GAMEDIR/portable.txt"
 
+# First run: start from the cheapest settings (original water/textures/music,
+# no MSAA, 30 Hz, native resolution). Existing player choices are kept.
+for f in graphics.json sound.json water.json haptics.json; do
+  [ -f "$GAMEDIR/$f" ] || cp "$GAMEDIR/defaults/$f" "$GAMEDIR/$f"
+done
+
 # See Sternenfuchs: get_controls only puts one unrelated GUID into
 # SDL_GAMECONTROLLERCONFIG, so use the CFW's complete mapping database.
 if [ -f "$controlfolder/${CFW_NAME}/gamecontrollerdb.txt" ]; then
@@ -88,6 +94,8 @@ $ESUDO env \
   VK_ICD_FILENAMES="$mesa_dir/share/vulkan/icd.d/lvp_icd.aarch64.json" \
   WRAPPED_LIBRARY_PATH="$GAMEDIR/libs.${DEVICE_ARCH}" \
   WESTON_KIOSK_NO_RESIZE=1 \
+  MESA_SHADER_CACHE_DIR="$GAMEDIR/shadercache" \
+  MESA_SHADER_CACHE_MAX_SIZE=512M \
   SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig" \
   SDL_GAMECONTROLLERCONFIG_FILE="$SDL_GAMECONTROLLERCONFIG_FILE" \
   $weston_dir/westonwrap.sh drm gl kiosk llvmpipe \

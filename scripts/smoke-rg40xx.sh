@@ -40,6 +40,28 @@ for t in $SHOTS; do
 done
 ( sleep 20; top -b -n 1 | head -15 > /tmp/wr64-top.txt ) &
 
+# Memory watchdog. The device has 1 GB, no swap; an earlier run left it
+# unreachable. Log to the SD card (survives a hang) and stop the game before
+# memory runs out.
+MEMLOG="$GAMEDIR/memtrace.txt"
+: > "$MEMLOG"
+(
+  while true; do
+    avail=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)
+    rss=$(ps -o rss= -C WaveRace64Recomp.aarch64 2>/dev/null | awk '{s+=$1} END {print int(s/1024)}')
+    load=$(cut -d' ' -f1 /proc/loadavg)
+    echo "$(date +%T) avail=${avail}MB game_rss=${rss:-0}MB load=$load" >> "$MEMLOG"
+    sync
+    if [ "${avail:-999}" -lt 60 ]; then
+      echo "$(date +%T) WATCHDOG: MemAvailable ${avail}MB < 60MB, killing game" >> "$MEMLOG"
+      pkill -9 -f WaveRace64Recomp.aarch64
+      sync
+    fi
+    sleep 5
+  done
+) &
+WATCHDOG=$!
+
 start=$(date +%s)
 timeout -k 15 -s INT "$SECONDS_TO_RUN" bash /userdata/roms/ports/Wellenrennen.sh >/dev/null 2>&1
 rc=$?
@@ -48,7 +70,10 @@ end=$(date +%s)
 pkill -9 -f WaveRace64Recomp 2>/dev/null
 /tmp/weston/westonwrap.sh cleanup >/dev/null 2>&1
 pkill -9 gptokeyb 2>/dev/null
+kill "$WATCHDOG" 2>/dev/null
 echo "=== launcher exit: $rc after $((end - start)) s (124 = still running at timeout) ==="
+echo "=== memory trace ==="
+cat "$MEMLOG"
 echo "=== top at 20 s ==="
 cat /tmp/wr64-top.txt 2>/dev/null
 REMOTE
