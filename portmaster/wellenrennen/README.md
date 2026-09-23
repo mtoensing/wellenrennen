@@ -1,38 +1,33 @@
 ## Wellenrennen
 
-Experimental PortMaster/aarch64 packaging for
+Experimental PortMaster/aarch64 port of
 [Wave Race 64: Recompiled](https://github.com/elliotttate/wave-race-64-recomp).
 
-This package never contains Nintendo ROM data.
+This package contains no Nintendo ROM data. Like upstream's own Windows and
+macOS releases, the executable contains game code statically recompiled from
+the ROM; the game still needs your ROM at runtime.
 
 ### ROM
 
-Copy your own legally obtained **Wave Race 64 (USA) (Rev A)** ROM into:
+Copy your own legally obtained **Wave Race 64 (USA) (Rev A)** ROM (`.z64`)
+into `ports/wellenrennen/`.
 
-`ports/wellenrennen/`
-
-Expected SHA-1:
-
-`508dfc2d4caa42b6f6de5263d0aed5e44ac7966a`
+Expected SHA-1: `508dfc2d4caa42b6f6de5263d0aed5e44ac7966a`
 
 Other revisions are not supported by the pinned recompilation.
 
-### Prototype target
+### Renderer
 
-Initial hardware:
+Upstream renders with RT64, which needs Vulkan. The Mali GLES drivers of
+H700 CFWs have no Vulkan, so this port renders through the
+[GLideN64](https://github.com/gonetz/GLideN64) plugin on OpenGL ES 3 with the
+CFW's own SDL2. Its settings are in `gliden64.ini` (native 320x240, no
+anti-aliasing, threaded video). Original water, textures and music; no
+rumble.
 
-- Anbernic RG40XX H
-- H700 / Cortex-A53
-- aarch64
-- Mali-G31 MP2
-- 1 GB RAM
-- KNULLI
-- 640x480
+### Status
 
-Bring-up starts with the least expensive configuration: 4:3, original
-textures, original water and no optional visual enhancements.
-
-Wave Race runs its race simulation at 30 Hz. A later goal is RT64 presentation
-at 60 FPS using interpolation without changing the game's simulation rate.
-
-This is not yet a finished PortMaster submission.
+Tested on an Anbernic RG40XX H (H700, Mali-G31, 1 GB) with KNULLI:
+menus, a full race and the results screen, with audio. The race holds the
+20 frames/s it requests; menus and the race start dip to 12-17 frames/s.
+Not yet tested on other devices or CFWs.

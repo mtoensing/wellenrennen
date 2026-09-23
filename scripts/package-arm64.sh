@@ -32,6 +32,14 @@ docker run --rm -v wr64-work:/work -v "$PORT:/out" "$IMAGE" bash -c '
   rm -rf /out/assets/music /out/assets/textures
   cp /work/build-gliden64/plugin/Release/mupen64plus-video-GLideN64.so /out/gliden64/
   cp /work/build-arm64/libwr64_m64pcore.so /out/gliden64/
+  # Licenses of everything in the binary and the plugin.
+  mkdir -p /out/licenses
+  cp /work/wave-race-64-recomp/LICENSE /out/licenses/LICENSE.WaveRace64Recompiled.txt
+  cp /work/wave-race-64-recomp/THIRD_PARTY_NOTICES.md /out/licenses/THIRD_PARTY_NOTICES.WaveRace64Recompiled.md
+  cp /work/wave-race-64-recomp/lib/RT64/LICENSE /out/licenses/LICENSE.RT64.txt
+  cp /work/GLideN64/LICENSE /out/licenses/LICENSE.GLideN64.txt
+  printf "GLideN64 (GPL-2.0) source: https://github.com/gonetz/GLideN64/tree/%s\n" \
+    "$(git -C /work/GLideN64 rev-parse HEAD)" > /out/licenses/SOURCE.GLideN64.txt
 '
 
 ( cd "$STAGE" && zip -qr "$ROOT/dist/wellenrennen.zip" Wellenrennen.sh wellenrennen )
