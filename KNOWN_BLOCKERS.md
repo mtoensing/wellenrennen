@@ -277,3 +277,20 @@ Device runs through the real launcher (Westonpack `drm gl kiosk llvmpipe`):
   29 of 30 on the results screen. Screenshots:
   `docs/evidence/2026-09-23-race-gliden64.png`,
   `docs/evidence/2026-09-23-race-results-gliden64.png`.
+
+## 2026-09-23 — race performance with GLideN64 (lowest settings)
+
+`scripts/bench-race-rg40xx.sh` (race input script, 5 s windows):
+
+- Default (single-threaded GLideN64): 17-18 frames/s in the race; the
+  render thread (`Gfx_Thread`, GLideN64 HLE + GL) at 100 % of one core, game
+  logic threads < 10 %.
+- `ThreadedVideo = True` (now the default in `gliden64.ini`): 20.0 frames/s
+  in the race = the rate this race requests ("it asked for 20"); render
+  thread ~87 % + GL thread ~25 %.
+- No gain / worse, not adopted: `EnableHWLighting = True` (same),
+  `EnableFBEmulation = False` (10-13 frames/s), GLideN64 with LTO
+  (`USE_IPO=ON`, render thread 883 vs 874 ticks/10 s).
+- Menus and the race start still dip to 12-17 frames/s; parts of the game
+  that request 30 frames/s will not reach it with ~13 % render-thread
+  headroom.
