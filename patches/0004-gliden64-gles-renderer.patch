@@ -413,10 +413,10 @@ index 0000000..590a6c0
 +}
 diff --git a/src/gliden64_renderer.cpp b/src/gliden64_renderer.cpp
 new file mode 100644
-index 0000000..2d06bd9
+index 0000000..e0eed97
 --- /dev/null
 +++ b/src/gliden64_renderer.cpp
-@@ -0,0 +1,304 @@
+@@ -0,0 +1,325 @@
 +// GLideN64-backed renderer context (OpenGL ES), selected with
 +// WR64_RENDERER=gliden64.
 +//
@@ -636,7 +636,12 @@ index 0000000..2d06bd9
 +            std::fprintf(stderr, "[gliden64] first display list 0x%08X\n", fields[12]);
 +        }
 +        ++count;
-+        plugin_.ProcessDList();
++        ++dls_;
++        // Bisect switch: count the display list but do not render it.
++        static const bool skip_dl = std::getenv("WR64_SKIP_DL") != nullptr;
++        if (!skip_dl) {
++            plugin_.ProcessDList();
++        }
 +    }
 +
 +    void send_dummy_workload(uint32_t) override {}
@@ -646,6 +651,18 @@ index 0000000..2d06bd9
 +            return;
 +        }
 +        notice_vi_changes();
++
++        // ultramodern queues a screen update on every VI (60 Hz) into the same
++        // action queue as the game's display lists, and that queue serves the
++        // producer with the most pending items first. If presenting takes
++        // longer than a VI, the VI updates pile up and the game's next display
++        // list is never dequeued -- the game waits for it forever. The game
++        // shows a new frame only when it moves the VI origin (20-30 times a
++        // second), so present only then.
++        if (vi_->VI_ORIGIN_REG == last_origin_) {
++            return;
++        }
++        last_origin_ = vi_->VI_ORIGIN_REG;
 +        plugin_.UpdateScreen();
 +
 +        // Frame pacing report: rendered frames per second, every 5 s.
@@ -654,9 +671,11 @@ index 0000000..2d06bd9
 +        if (report_at_ == 0) {
 +            report_at_ = now + 5000;
 +        } else if (now >= report_at_) {
-+            std::fprintf(stderr, "[gliden64] %.1f screen updates/s\n",
-+                         frames_ * 1000.0 / (now - report_at_ + 5000));
++            const double seconds = (now - report_at_ + 5000) / 1000.0;
++            std::fprintf(stderr, "[gliden64] game %.1f frames/s (display lists), %.1f presented frames/s\n",
++                         dls_ / seconds, frames_ / seconds);
 +            frames_ = 0;
++            dls_ = 0;
 +            report_at_ = now + 5000;
 +        }
 +    }
@@ -691,7 +710,9 @@ index 0000000..2d06bd9
 +    ultramodern::renderer::ViRegs* vi_ = nullptr;
 +    uint32_t last_status_ = 0xFFFFFFFF;
 +    uint32_t last_width_ = 0xFFFFFFFF;
++    uint32_t last_origin_ = 0xFFFFFFFF;
 +    uint64_t frames_ = 0;
++    uint64_t dls_ = 0;
 +    uint64_t report_at_ = 0;
 +
 +    std::array<uint8_t, 0x40> header_{};

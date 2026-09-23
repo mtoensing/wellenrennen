@@ -1,0 +1,81 @@
+diff --git a/ultramodern/src/events.cpp b/ultramodern/src/events.cpp
+index 17d7a47..ebcb33f 100644
+--- a/ultramodern/src/events.cpp
++++ b/ultramodern/src/events.cpp
+@@ -184,6 +184,11 @@ extern moodycamel::LightweightSemaphore graphics_shutdown_ready;
+ 
+ void set_dummy_vi(bool odd);
+ 
++static bool sched_trace() {
++    static const bool on = std::getenv("ULTRAMODERN_SCHED_TRACE") != nullptr;
++    return on;
++}
++
+ void vi_thread_func() {
+     ultramodern::set_native_thread_name("VI Thread");
+     // This thread should be prioritized over every other thread in the application, as it's what allows
+@@ -261,12 +266,14 @@ void vi_thread_func() {
+ }
+ 
+ void sp_complete() {
++    if (sched_trace()) fprintf(stderr, "[sched] sp_complete\n");
+     uint8_t* rdram = events_context.rdram;
+     std::lock_guard lock{ events_context.message_mutex };
+     ultramodern::enqueue_external_message_src(events_context.sp.mq, events_context.sp.msg, false, ultramodern::EventMessageSource::Sp);
+ }
+ 
+ void dp_complete() {
++    if (sched_trace()) fprintf(stderr, "[sched] dp_complete\n");
+     uint8_t* rdram = events_context.rdram;
+     std::lock_guard lock{ events_context.message_mutex };
+     ultramodern::enqueue_external_message_src(events_context.dp.mq, events_context.dp.msg, false, ultramodern::EventMessageSource::Dp);
+@@ -363,6 +370,7 @@ void gfx_thread_func(uint8_t* rdram, moodycamel::LightweightSemaphore* thread_re
+         Action action;
+         if (events_context.action_queue.wait_dequeue_timed(action, 1ms)) {
+             // Determine the action type and act on it
++            if (sched_trace() && action.index() != 1) fprintf(stderr, "[sched] gfx thread action %zu\n", action.index());
+             if (const auto* task_action = std::get_if<SpTaskAction>(&action)) {
+                 // Tell the game that the RSP completed instantly. This will allow it to queue other task types, but it won't
+                 // start another graphics task until the RDP is also complete. Games usually preserve the RSP inputs until the RDP
+@@ -385,6 +393,8 @@ void gfx_thread_func(uint8_t* rdram, moodycamel::LightweightSemaphore* thread_re
+                 // printf("Renderer ProcessDList time: %d us\n", static_cast<u32>(std::chrono::duration_cast<std::chrono::microseconds>(renderer_end - renderer_start).count()));
+             }
+             else if (const auto* screen_update_action = std::get_if<ScreenUpdateAction>(&action)) {
++                static unsigned su = 0;
++                if (sched_trace() && (++su % 120) == 0) fprintf(stderr, "[sched] gfx queue size=%zu\n", events_context.action_queue.size_approx());
+                 events_context.vi.update_screen_regs = screen_update_action->regs;
+                 renderer_context->update_screen();
+                 display_refresh_rate = renderer_context->get_display_framerate();
+@@ -564,10 +574,12 @@ extern "C" PTR(void) osViGetCurrentFramebuffer() {
+ 
+ void ultramodern::submit_rsp_task(RDRAM_ARG PTR(OSTask) task_) {
+     OSTask* task = TO_PTR(OSTask, task_);
++    if (sched_trace()) fprintf(stderr, "[sched] submit type=%u\n", (unsigned)task->t.type);
+ 
+     // Send gfx tasks to the graphics action queue
+     if (task->t.type == M_GFXTASK) {
+-        events_context.action_queue.enqueue(SpTaskAction{ *task });
++        const bool ok = events_context.action_queue.enqueue(SpTaskAction{ *task });
++        if (sched_trace()) fprintf(stderr, "[sched] gfx enqueue ok=%d size=%zu\n", ok, events_context.action_queue.size_approx());
+     }
+     // Set all other tasks as the RSP task
+     else {
+diff --git a/ultramodern/src/mesgqueue.cpp b/ultramodern/src/mesgqueue.cpp
+index 9944a02..920d1d4 100644
+--- a/ultramodern/src/mesgqueue.cpp
++++ b/ultramodern/src/mesgqueue.cpp
+@@ -1,3 +1,5 @@
++#include <cstdio>
++#include <cstdlib>
+ #include <bitset>
+ #include <thread>
+ 
+@@ -90,6 +92,8 @@ s32 MQ_IS_FULL(OSMesgQueue* mq) {
+ }
+ 
+ bool do_send(RDRAM_ARG PTR(OSMesgQueue) mq_, OSMesg msg, bool jam, bool block) {
++    static const bool trace = std::getenv("ULTRAMODERN_SCHED_TRACE") != nullptr;
++    if (trace && (uint32_t)mq_ == 0x80154130u) fprintf(stderr, "[sched] main_mq <- 0x%x\n", (unsigned)msg);
+     OSMesgQueue* mq = TO_PTR(OSMesgQueue, mq_);
+     if (!block) {
+         // If non-blocking, fail if the queue is full.

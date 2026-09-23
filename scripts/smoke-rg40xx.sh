@@ -18,7 +18,7 @@ SHOTS="${SMOKE_SHOTS:-30 60 85}"
 mkdir -p "$ROOT/device-logs"
 rm -f "$ROOT"/device-logs/fb-*.png "$ROOT"/device-logs/fb-*.raw
 
-ssh "${USER}@${HOST}" "SECONDS_TO_RUN=$SECONDS_TO_RUN SHOTS='$SHOTS' bash -s" <<'REMOTE' | tee "$ROOT/device-logs/smoke.log"
+ssh "${USER}@${HOST}" "SECONDS_TO_RUN=$SECONDS_TO_RUN SHOTS='$SHOTS' SMOKE_SCRIPT='${SMOKE_SCRIPT:-}' bash -s" <<'REMOTE' | tee "$ROOT/device-logs/smoke.log"
 set -u
 GAMEDIR="/userdata/roms/ports/wellenrennen"
 export HOME=/userdata/system
@@ -70,6 +70,8 @@ MEMLOG="$GAMEDIR/memtrace.txt"
 WATCHDOG=$!
 
 start=$(date +%s)
+# SMOKE_SCRIPT=race drives the game into a race with upstream's input script.
+[ -n "${SMOKE_SCRIPT:-}" ] && export WR64_INPUT_SCRIPT="$GAMEDIR/tests/$SMOKE_SCRIPT.txt"
 timeout -k 15 -s INT "$SECONDS_TO_RUN" bash /userdata/roms/ports/Wellenrennen.sh >/dev/null 2>&1
 rc=$?
 end=$(date +%s)

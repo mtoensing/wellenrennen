@@ -63,6 +63,7 @@ pm_platform_helper "$BIN"
 # OpenGL ES instead.
 $ESUDO env \
   WR64_RENDERER=gliden64 \
+  WR64_INPUT_SCRIPT="${WR64_INPUT_SCRIPT:-}" \
   WR64_GLIDEN64_PLUGIN="$GAMEDIR/gliden64/mupen64plus-video-GLideN64.so" \
   WR64_GLIDEN64_CORE="$GAMEDIR/gliden64/libwr64_m64pcore.so" \
   SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig" \

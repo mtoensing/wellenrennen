@@ -255,3 +255,25 @@ Device runs through the real launcher (Westonpack `drm gl kiosk llvmpipe`):
 - Audio over SSH needs EmulationStation's environment (`XDG_RUNTIME_DIR=/var/run`);
   without it SDL's ALSA open fails with "Host is down". The smoke script
   imports it; a launch from the Ports menu already has it.
+
+## 2026-09-23 — game stalled after 4 frames: VI updates starved the game's display list
+
+- Symptom (GLES renderer): title screen drawn, then `0 frames/s`; game
+  scheduler (`Main_Thread`, decomp `src/game/main.c`) stuck in state 1 /
+  busy 1 waiting for an SP-done (0x17).
+- Trace (`n64modernruntime-9001-sched-trace.patch`,
+  `ULTRAMODERN_SCHED_TRACE=1`): the 5th graphics task was enqueued
+  (`enqueue ok=1`) but never dequeued by the gfx thread; the gfx action
+  queue grew steadily (34, 35, 36, 37 ...). ultramodern's VI thread enqueues
+  a `ScreenUpdateAction` every VI (60 Hz); presenting through
+  GLideN64/SDL/Mali took slightly longer than a VI, and moodycamel's
+  multi-producer dequeue prefers the producer with the most items, so the
+  single `SpTaskAction` from the game thread was starved forever.
+- Fix (patch 0004): `GLideN64Context::update_screen` presents only when the
+  VI origin changed (a new game frame), so the gfx thread keeps up.
+- Result on the RG40XX H (race input script, lowest settings): title ->
+  main menu -> rider select -> course overview -> race -> race results;
+  menus 12-20 of the requested 20 frames/s, 17-20 frames/s in the race,
+  29 of 30 on the results screen. Screenshots:
+  `docs/evidence/2026-09-23-race-gliden64.png`,
+  `docs/evidence/2026-09-23-race-results-gliden64.png`.

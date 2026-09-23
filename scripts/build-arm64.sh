@@ -119,17 +119,19 @@ need mips-linux-gnu-as
 # the macOS one) plus our ARM64 DXC selection ---
 cd "$SRC"
 # patches/NNNN-*.patch apply to the Wave Race tree, patches/<submodule>-*.patch
-# to that submodule. Already-applied patches are skipped.
-apply_patch() {
-  local dir="$1" patch="$2"
-  if git -C "$dir" apply --reverse --check "$patch" 2>/dev/null; then
-    return
-  fi
-  git -C "$dir" apply "$patch"
-  echo "patched: $(basename "$patch")"
+# to that submodule. Tracked sources are reset to the pinned revisions first so
+# the series always applies from the same base (ROM-derived output is untracked
+# and survives the reset).
+reset_tree() {
+  git -C "$1" checkout -q -- .
+  git -C "$1" clean -q -f -- src include 2>/dev/null || true
 }
-for p in "$ROOT"/patches/[0-9]*.patch; do apply_patch "$SRC" "$p"; done
-for p in "$ROOT"/patches/recompfrontend-*.patch; do apply_patch "$SRC/lib/RecompFrontend" "$p"; done
+reset_tree "$SRC"
+reset_tree "$SRC/lib/RecompFrontend"
+reset_tree "$SRC/lib/N64ModernRuntime"
+for p in "$ROOT"/patches/[0-9]*.patch; do git -C "$SRC" apply "$p"; echo "patched: $(basename "$p")"; done
+for p in "$ROOT"/patches/recompfrontend-*.patch; do git -C "$SRC/lib/RecompFrontend" apply "$p"; echo "patched: $(basename "$p")"; done
+for p in "$ROOT"/patches/n64modernruntime-*.patch; do git -C "$SRC/lib/N64ModernRuntime" apply "$p"; echo "patched: $(basename "$p")"; done
 for patch in patch_rt64.py patch_n64recomp.py patch_rsprecomp.py \
              patch_librecomp.py patch_water.py patch_runtime_shutdown.py \
              patch_texture_packs.py; do
