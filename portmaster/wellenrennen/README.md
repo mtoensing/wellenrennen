@@ -28,6 +28,8 @@ rumble.
 ### Status
 
 Tested on an Anbernic RG40XX H (H700, Mali-G31, 1 GB) with KNULLI:
-menus, a full race and the results screen, with audio. The race holds the
-20 frames/s it requests; menus and the race start dip to 12-17 frames/s.
+menus, a full race and the results screen, with audio. Races and menus hold
+the 20 frames/s the game requests once the shader cache is built (the first
+session compiles shaders and stutters; exit with the hotkey so the cache is
+saved). Short dips to 16-18 frames/s remain around the race start.
 Not yet tested on other devices or CFWs.

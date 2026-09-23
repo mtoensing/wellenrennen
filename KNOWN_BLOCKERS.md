@@ -294,3 +294,18 @@ Device runs through the real launcher (Westonpack `drm gl kiosk llvmpipe`):
 - Menus and the race start still dip to 12-17 frames/s; parts of the game
   that request 30 frames/s will not reach it with ~13 % render-thread
   headroom.
+
+## 2026-09-23 — shader cache never persisted; exit hotkey aborted
+
+- Profile of the render thread (gdb sampling, race): most samples wait in
+  GLideN64 `WaitForSwapBuffersQueued`; some compile shaders mid-race
+  (`wrCreateShader`). GPU devfreq stays at its lowest 240 MHz (not GPU-bound).
+- GLideN64 writes its shader cache only in `RomClosed`. SIGTERM (what the
+  exit hotkey sends) became SDL_QUIT, which the frontend answered with an
+  RT64-drawn quit prompt: `Attempted to open an invalid UI context`, exit 1,
+  no `RomClosed`, cache stayed at 60 bytes of keys.
+- Fix (patch 0004): in GLideN64 mode SDL_QUIT calls `ultramodern::quit()`
+  directly. Verified: `SDL_QUIT received`, `shutting down (writes the shader
+  cache)`, `runtime shut down`; cache grew to 445 KB.
+- With the warm cache the menus hold 20 frames/s (were 12-17); short dips to
+  16-18 remain around the race start.

@@ -47,10 +47,31 @@ index 01d00ea..f1aeb1c 100644
  std::unique_ptr<ultramodern::renderer::RendererContext> create_render_context(
      uint8_t* rdram, ultramodern::renderer::WindowHandle window_handle, bool developer_mode);
 diff --git a/src/callbacks.cpp b/src/callbacks.cpp
-index e38bea3..352ac04 100644
+index e38bea3..c291030 100644
 --- a/src/callbacks.cpp
 +++ b/src/callbacks.cpp
-@@ -799,7 +799,11 @@ ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::
+@@ -111,6 +111,20 @@ void poll_input() {
+     // as "vector subscript out of range" and fails the process immediately,
+     // uncatchably, with no stack trace. Keyboard input never does that lookup,
+     // which is why only a gamepad triggered it.
++#if WR64_WITH_GLIDEN64
++    // The frontend answers SDL_QUIT (PortMaster's exit hotkey sends SIGTERM,
++    // which SDL turns into SDL_QUIT) with a quit prompt drawn through RT64.
++    // Without RT64 that aborts the process, skipping the renderer's shutdown
++    // -- and GLideN64 writes its shader cache only there. Quit directly.
++    if (wr64::use_gliden64()) {
++        SDL_PumpEvents();
++        SDL_Event quit_event;
++        if (SDL_PeepEvents(&quit_event, 1, SDL_GETEVENT, SDL_QUIT, SDL_QUIT) > 0) {
++            std::fprintf(stderr, "[wr64] SDL_QUIT received; asking the runtime to quit\n");
++            ultramodern::quit();
++        }
++    }
++#endif
+     recompinput::handle_events();
+     refresh_primary_controller();
+ #else
+@@ -799,7 +813,11 @@ ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::
  #elif defined(__linux__)
      // RT64 is built with RT64_SDL_WINDOW_VULKAN on Linux and creates its
      // surface with SDL_Vulkan_CreateSurface, which needs a Vulkan window.
@@ -92,10 +113,10 @@ index 850ca67..ae421f4 100644
          // before context creation leaves an invisible menu capturing the pad.
 diff --git a/src/gliden64_core.cpp b/src/gliden64_core.cpp
 new file mode 100644
-index 0000000..590a6c0
+index 0000000..274c9c0
 --- /dev/null
 +++ b/src/gliden64_core.cpp
-@@ -0,0 +1,315 @@
+@@ -0,0 +1,317 @@
 +// The mupen64plus core API (Config* and VidExt_*) that the GLideN64 plugin
 +// resolves with dlsym on the "core" handle it gets in PluginStartup.
 +//
@@ -345,7 +366,9 @@ index 0000000..590a6c0
 +                         SDL_GL_GetProcAddress("glGetString"))(0x1F01 /* GL_RENDERER */)));
 +    }
 +    SDL_GL_MakeCurrent(g_window, g_gl);
-+    SDL_GL_SetSwapInterval(g_swap_interval);
++    const int swap_result = SDL_GL_SetSwapInterval(g_swap_interval);
++    std::fprintf(stderr, "[gliden64] swap interval %d requested -> %s, now %d\n", g_swap_interval,
++                 swap_result == 0 ? "ok" : SDL_GetError(), SDL_GL_GetSwapInterval());
 +    return M64ERR_SUCCESS;
 +}
 +
@@ -413,10 +436,10 @@ index 0000000..590a6c0
 +}
 diff --git a/src/gliden64_renderer.cpp b/src/gliden64_renderer.cpp
 new file mode 100644
-index 0000000..e0eed97
+index 0000000..9eb5216
 --- /dev/null
 +++ b/src/gliden64_renderer.cpp
-@@ -0,0 +1,325 @@
+@@ -0,0 +1,326 @@
 +// GLideN64-backed renderer context (OpenGL ES), selected with
 +// WR64_RENDERER=gliden64.
 +//
@@ -682,6 +705,7 @@ index 0000000..e0eed97
 +
 +    void shutdown() override {
 +        if (valid_) {
++            std::fprintf(stderr, "[gliden64] shutting down (writes the shader cache)\n");
 +            plugin_.RomClosed();
 +            plugin_.PluginShutdown();
 +            valid_ = false;
