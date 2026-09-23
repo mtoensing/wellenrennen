@@ -436,10 +436,10 @@ index 0000000..274c9c0
 +}
 diff --git a/src/gliden64_renderer.cpp b/src/gliden64_renderer.cpp
 new file mode 100644
-index 0000000..e3e45a9
+index 0000000..440941f
 --- /dev/null
 +++ b/src/gliden64_renderer.cpp
-@@ -0,0 +1,338 @@
+@@ -0,0 +1,420 @@
 +// GLideN64-backed renderer context (OpenGL ES), selected with
 +// WR64_RENDERER=gliden64.
 +//
@@ -509,6 +509,9 @@ index 0000000..e3e45a9
 +    void (*UpdateScreen)() = nullptr;
 +    void (*ViStatusChanged)() = nullptr;
 +    void (*ViWidthChanged)() = nullptr;
++    // Optional: frame interpolation (patches/gliden64-0001).
++    void (*InterpNewFrame)() = nullptr;
++    void (*InterpBeginDList)(float) = nullptr;
 +
 +    bool load(const char* path) {
 +        handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
@@ -533,6 +536,8 @@ index 0000000..e3e45a9
 +        get(UpdateScreen, "UpdateScreen");
 +        get(ViStatusChanged, "ViStatusChanged");
 +        get(ViWidthChanged, "ViWidthChanged");
++        InterpNewFrame = reinterpret_cast<void (*)()>(dlsym(handle, "InterpNewFrame"));
++        InterpBeginDList = reinterpret_cast<void (*)(float)>(dlsym(handle, "InterpBeginDList"));
 +        return ok;
 +    }
 +};
@@ -618,6 +623,16 @@ index 0000000..e3e45a9
 +            return;
 +        }
 +        vi_ = vi;
++        rdram_ = rdram;
++        // Experimental (WR64_INTERP=1): in-between frames by replaying the
++        // current display list with blended matrices. Off by default: on the
++        // RG40XX H a race frame costs ~40 ms on the GL side, leaving no room for
++        // extra renders, and replays after DP-complete can read display list
++        // data the game has already overwritten.
++        const char* interp = std::getenv("WR64_INTERP");
++        interp_ = plugin_.InterpNewFrame != nullptr && plugin_.InterpBeginDList != nullptr &&
++                  interp != nullptr && std::strcmp(interp, "1") == 0;
++        std::fprintf(stderr, "[gliden64] frame interpolation %s\n", interp_ ? "on" : "off");
 +        valid_ = true;
 +        setup_result = ultramodern::renderer::SetupResult::Success;
 +        std::fprintf(stderr, "[gliden64] renderer ready\n");
@@ -637,10 +652,41 @@ index 0000000..e3e45a9
 +            return;
 +        }
 +        notice_vi_changes();
++        frame_task_ = *task;
++        have_frame_ = true;
 +
-+        // GLideN64 reads the task from the end of DMEM, as the RSP would have
-+        // it, as native-endian words at 0xFC0 (OSTask layout).
++        static uint64_t count = 0;
++        if (count == 0) {
++            std::fprintf(stderr, "[gliden64] first display list 0x%08X\n",
++                         physical(static_cast<uint32_t>(task->t.data_ptr)));
++        }
++        ++count;
++        ++dls_;
++
++        if (!interp_) {
++            render(1.0f);
++            return;
++        }
++
++        // A new game frame: its matrices pair with the previous frame's. It is
++        // shown over `period_` VIs (the game's own frame divider), first the
++        // in-between frames, then itself on the last one. The first is drawn
++        // now, while everything the display list points at is still as the
++        // game left it; the rest follow on the next VIs.
++        plugin_.InterpNewFrame();
++        period_ = frame_divider();
++        phase_ = 1;
++        render(static_cast<float>(phase_) / period_);
++        waiting_swap_ = true;
++        swap_base_origin_ = vi_->VI_ORIGIN_REG;
++        waited_vis_ = 0;
++    }
++
++    // Replays the stored task through GLideN64. With interpolation, t < 1
++    // draws an in-between frame (see patches/gliden64-0001).
++    void render(float t) {
 +        const auto w = [](auto v) { return static_cast<uint32_t>(v); };
++        const OSTask* task = &frame_task_;
 +        const uint32_t fields[16] = {
 +            w(task->t.type), w(task->t.flags),
 +            physical(w(task->t.ucode_boot)), w(task->t.ucode_boot_size),
@@ -651,22 +697,29 @@ index 0000000..e3e45a9
 +            physical(w(task->t.data_ptr)), w(task->t.data_size),
 +            physical(w(task->t.yield_data_ptr)), w(task->t.yield_data_size),
 +        };
++        // GLideN64 reads the task from the end of DMEM, as the RSP would have
++        // it, as native-endian words at 0xFC0 (OSTask layout).
 +        std::memcpy(dmem_.data() + 0xFC0, fields, sizeof(fields));
 +        sp_status_reg_ = 0x0203;  // HALT | BROKE | TASKDONE, as the RSP plugin sets it
 +
-+        static uint64_t count = 0;
-+        if (count == 0) {
-+            std::fprintf(stderr, "[gliden64] first display list 0x%08X\n", fields[12]);
-+        }
-+        ++count;
-+        ++dls_;
 +        // Bisect switch: count the display list but do not render it.
 +        static const bool skip_dl = std::getenv("WR64_SKIP_DL") != nullptr;
-+        if (!skip_dl) {
-+            const uint64_t t0 = SDL_GetPerformanceCounter();
-+            plugin_.ProcessDList();
-+            dl_ticks_ += SDL_GetPerformanceCounter() - t0;
++        if (skip_dl) {
++            return;
 +        }
++        if (interp_) {
++            plugin_.InterpBeginDList(t);
++        }
++        const uint64_t t0 = SDL_GetPerformanceCounter();
++        plugin_.ProcessDList();
++        dl_ticks_ += SDL_GetPerformanceCounter() - t0;
++        ++renders_;
++    }
++
++    // 60 / frames per second the game asked for: its VI retrace divider.
++    int frame_divider() const {
++        const int32_t divider = *reinterpret_cast<const int32_t*>(rdram_ + 0xD461C);
++        return divider >= 1 && divider <= 4 ? divider : 3;
 +    }
 +
 +    void send_dummy_workload(uint32_t) override {}
@@ -677,22 +730,44 @@ index 0000000..e3e45a9
 +        }
 +        notice_vi_changes();
 +
-+        // ultramodern queues a screen update on every VI (60 Hz) into the same
-+        // action queue as the game's display lists, and that queue serves the
-+        // producer with the most pending items first. If presenting takes
-+        // longer than a VI, the VI updates pile up and the game's next display
-+        // list is never dequeued -- the game waits for it forever. The game
-+        // shows a new frame only when it moves the VI origin (20-30 times a
-+        // second), so present only then.
-+        if (vi_->VI_ORIGIN_REG == last_origin_) {
++        if (!interp_ || !have_frame_) {
++            // ultramodern queues a screen update on every VI (60 Hz) into the
++            // same action queue as the game's display lists, and that queue
++            // serves the producer with the most pending items first. If
++            // presenting takes longer than a VI, the VI updates pile up and
++            // the game's next display list is never dequeued -- the game waits
++            // for it forever. Without interpolation the screen only changes
++            // when the game moves the VI origin, so present only then.
++            if (vi_->VI_ORIGIN_REG != last_origin_) {
++                last_origin_ = vi_->VI_ORIGIN_REG;
++                present();
++            }
 +            return;
 +        }
-+        last_origin_ = vi_->VI_ORIGIN_REG;
++
++        if (waiting_swap_) {
++            // The first in-between frame is drawn into the frame's buffer;
++            // show it once the game has swapped to that buffer.
++            if (vi_->VI_ORIGIN_REG != swap_base_origin_ || ++waited_vis_ >= period_) {
++                waiting_swap_ = false;
++                last_origin_ = vi_->VI_ORIGIN_REG;
++                present();
++            }
++            return;
++        }
++        if (phase_ < period_) {
++            ++phase_;
++            render(static_cast<float>(phase_) / period_);
++            present();
++        }
++    }
++
++    void present() {
 +        const uint64_t t0 = SDL_GetPerformanceCounter();
 +        plugin_.UpdateScreen();
 +        present_ticks_ += SDL_GetPerformanceCounter() - t0;
 +
-+        // Frame pacing report: rendered frames per second, every 5 s.
++        // Report every 5 s: game frames, frames shown, and the cost of each.
 +        ++frames_;
 +        const uint64_t now = SDL_GetTicks64();
 +        if (report_at_ == 0) {
@@ -700,15 +775,12 @@ index 0000000..e3e45a9
 +        } else if (now >= report_at_) {
 +            const double seconds = (now - report_at_ + 5000) / 1000.0;
 +            const double freq = static_cast<double>(SDL_GetPerformanceFrequency());
-+            std::fprintf(stderr, "[gliden64] game %.1f frames/s (display lists), %.1f presented frames/s;"
-+                         " ProcessDList %.1f ms, UpdateScreen %.1f ms per frame\n",
++            std::fprintf(stderr, "[gliden64] game %.1f frames/s, presented %.1f frames/s;"
++                         " ProcessDList %.1f ms, UpdateScreen %.1f ms each\n",
 +                         dls_ / seconds, frames_ / seconds,
-+                         dls_ ? dl_ticks_ * 1000.0 / freq / dls_ : 0.0,
-+                         frames_ ? present_ticks_ * 1000.0 / freq / frames_ : 0.0);
-+            dl_ticks_ = 0;
-+            present_ticks_ = 0;
-+            frames_ = 0;
-+            dls_ = 0;
++                         renders_ ? dl_ticks_ * 1000.0 / freq / renders_ : 0.0,
++                         present_ticks_ * 1000.0 / freq / frames_);
++            frames_ = dls_ = renders_ = dl_ticks_ = present_ticks_ = 0;
 +            report_at_ = now + 5000;
 +        }
 +    }
@@ -747,6 +819,16 @@ index 0000000..e3e45a9
 +    uint32_t last_origin_ = 0xFFFFFFFF;
 +    uint64_t frames_ = 0;
 +    uint64_t dls_ = 0;
++    uint64_t renders_ = 0;
++    uint8_t* rdram_ = nullptr;
++    bool interp_ = false;
++    bool have_frame_ = false;
++    bool waiting_swap_ = false;
++    uint32_t swap_base_origin_ = 0;
++    int waited_vis_ = 0;
++    int period_ = 3;
++    int phase_ = 0;
++    OSTask frame_task_{};
 +    uint64_t dl_ticks_ = 0;
 +    uint64_t present_ticks_ = 0;
 +    uint64_t report_at_ = 0;

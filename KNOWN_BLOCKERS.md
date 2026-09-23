@@ -327,3 +327,28 @@ Device runs through the real launcher (Westonpack `drm gl kiosk llvmpipe`):
   Framerate setting on PC/Mac). GLideN64 has none.
 - Stick input in the menu script did not change the menu path; the
   championship vs time-trial menu route is not verified.
+
+## 2026-09-23 — frame interpolation experiment (opt-in, WR64_INTERP=1)
+
+Implementation: `patches/gliden64-0001-frame-interpolation.patch` hooks
+GLideN64's `gSPMatrix`, pairs the k-th matrix load of a display list with the
+k-th of the previous game frame and blends them for t < 1. Patch 0004 replays
+the current display list over the game's frame divider (3 VIs at 20 frames/s):
+the first in-between frame in `send_dl`, the rest on the following VIs.
+
+Measured on the RG40XX H (race input script):
+
+- Menus: 20 game frames/s -> 40 presented frames/s.
+- Race: collapses to 9-15 game / 11-14 presented frames/s;
+  `ProcessDList` 22-29 ms and `UpdateScreen` 30-55 ms per render. Three
+  renders of a race frame per game frame do not fit into its 50 ms.
+- Race also aborted: `UNKNOWN GBI COMMAND 0x43`, then GLideN64 threw
+  "Attempted to create buffer of invalid size". Replaying a display list after
+  DP-complete reads data the game has already reused.
+- GL thread during a normal race: ~1100 ioctls/s, 0.09 s of syscall time per
+  5 s — no long driver stalls; the cost is the rendering work itself.
+
+Therefore off by default. A working version would have to render all
+in-between frames before DP-complete into separate targets and present them
+on later VIs (deeper GLideN64 changes), and would still need the race frame
+to render at least ~2x faster than now.

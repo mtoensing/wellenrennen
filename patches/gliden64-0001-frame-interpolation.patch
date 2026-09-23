@@ -1,0 +1,87 @@
+diff --git a/src/MupenPlusPluginAPI.cpp b/src/MupenPlusPluginAPI.cpp
+index c13060d6..4259c72d 100644
+--- a/src/MupenPlusPluginAPI.cpp
++++ b/src/MupenPlusPluginAPI.cpp
+@@ -5,6 +5,12 @@
+ 
+ extern "C" {
+ 
++// Frame interpolation controls (see gSP.cpp).
++void GLideN64_InterpNewFrame();
++void GLideN64_InterpBeginDList(float t);
++EXPORT void CALL InterpNewFrame(void) { GLideN64_InterpNewFrame(); }
++EXPORT void CALL InterpBeginDList(float t) { GLideN64_InterpBeginDList(t); }
++
+ EXPORT int CALL RomOpen(void)
+ {
+ 	if (rdram_size != nullptr)
+diff --git a/src/gSP.cpp b/src/gSP.cpp
+index ab5ada9d..90c7a9ad 100644
+--- a/src/gSP.cpp
++++ b/src/gSP.cpp
+@@ -1,3 +1,5 @@
++#include <vector>
++#include <cstring>
+ #include <math.h>
+ #include <stdio.h>
+ #include <string.h>
+@@ -160,6 +162,50 @@ void gSPNoOp()
+ 	DebugMsg(DEBUG_NORMAL | DEBUG_IGNORED, "gSPNoOp();\n");
+ }
+ 
++// ---------------------------------------------------------------------------
++// Frame interpolation (Wave Race 64: Recompiled PortMaster port)
++//
++// The host renders a game frame's display list several times per game frame
++// and asks for in-between frames: every matrix the display list loads is
++// replaced by a blend of the same load (paired by its index in the display
++// list) in the previous game frame and in this one. Geometry always comes
++// from the current frame; only transforms move. Loads that cannot be paired
++// (different count or kind than the previous frame) keep the current value.
++namespace {
++struct InterpMatrix { u8 param; f32 m[4][4]; };
++std::vector<InterpMatrix> g_interpPrev;
++std::vector<InterpMatrix> g_interpCur;
++size_t g_interpIndex = 0;
++f32 g_interpT = 1.0f;
++}
++
++extern "C" void GLideN64_InterpNewFrame()
++{
++	g_interpPrev.swap(g_interpCur);
++	g_interpCur.clear();
++}
++
++extern "C" void GLideN64_InterpBeginDList(float t)
++{
++	g_interpT = t;
++	g_interpIndex = 0;
++}
++
++static void interpMatrix(f32 mtx[4][4], u8 param)
++{
++	const size_t k = g_interpIndex++;
++	if (k >= g_interpCur.size())
++		g_interpCur.resize(k + 1);
++	g_interpCur[k].param = param;
++	memcpy(g_interpCur[k].m, mtx, sizeof(g_interpCur[k].m));
++	if (g_interpT >= 1.0f || k >= g_interpPrev.size() || g_interpPrev[k].param != param)
++		return;
++	const f32 t = g_interpT;
++	for (int i = 0; i < 4; ++i)
++		for (int j = 0; j < 4; ++j)
++			mtx[i][j] = g_interpPrev[k].m[i][j] + (mtx[i][j] - g_interpPrev[k].m[i][j]) * t;
++}
++
+ void gSPMatrix( u32 matrix, u8 param )
+ {
+ 
+@@ -176,6 +222,8 @@ void gSPMatrix( u32 matrix, u8 param )
+ 		return;
+ 	}
+ 
++	interpMatrix(mtx, param);
++
+ 	if (param & G_MTX_PROJECTION) {
+ 		if (param & G_MTX_LOAD)
+ 			CopyMatrix( gSP.matrix.projection, mtx );

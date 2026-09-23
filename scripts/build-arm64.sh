@@ -172,6 +172,8 @@ if [ "$(git -C "$GLIDEN64_SRC" rev-parse HEAD 2>/dev/null)" != "$GLIDEN64_COMMIT
   git clone "$GLIDEN64_REPO" "$GLIDEN64_SRC"
   git -C "$GLIDEN64_SRC" checkout -q "$GLIDEN64_COMMIT"
 fi
+git -C "$GLIDEN64_SRC" checkout -q -- .
+for p in "$ROOT"/patches/gliden64-*.patch; do git -C "$GLIDEN64_SRC" apply "$p"; echo "patched: $(basename "$p")"; done
 # Ubuntu 22.04's zstd has no CMake package; GLideN64 only needs the static lib.
 mkdir -p "$WORK/cmake-shims"
 cat > "$WORK/cmake-shims/ZSTDConfig.cmake" <<'ZSTD'
