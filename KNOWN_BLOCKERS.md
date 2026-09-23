@@ -309,3 +309,21 @@ Device runs through the real launcher (Westonpack `drm gl kiosk llvmpipe`):
   cache)`, `runtime shut down`; cache grew to 445 KB.
 - With the warm cache the menus hold 20 frames/s (were 12-17); short dips to
   16-18 remain around the race start.
+
+## 2026-09-23 — 20 frames/s in a race is the cartridge's own rate
+
+- Decomp (`reference/wr64-decomp`): the race initializer `func_8009345C`
+  (`src/game/code_4C750.c`, sets `gGameState = GAME_STATE_TIME_TRIAL`, used
+  for every race) writes the frame divider `D_800D461C = 3`, i.e. 20 frames/s
+  on the N64. The divider is read only by the VI handler in
+  `src/game/main.c`; no game logic uses it as a time step, so each game frame
+  is one fixed physics step. Raising the divider would speed the game up and
+  is ruled out (AGENTS.md: never change game logic timing).
+- Measured (per-frame timings in patch 0004's 5 s report, warm shader
+  cache, threaded video): race `ProcessDList` 8-12 ms + `UpdateScreen`
+  0.4 ms per frame; the GL thread mostly idles on its command queue. The port
+  delivers every frame the game produces (20.0/20) with room for more.
+- Presenting more than the game's rate needs frame interpolation (RT64's
+  Framerate setting on PC/Mac). GLideN64 has none.
+- Stick input in the menu script did not change the menu path; the
+  championship vs time-trial menu route is not verified.

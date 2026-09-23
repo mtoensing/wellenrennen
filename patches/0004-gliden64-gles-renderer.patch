@@ -436,10 +436,10 @@ index 0000000..274c9c0
 +}
 diff --git a/src/gliden64_renderer.cpp b/src/gliden64_renderer.cpp
 new file mode 100644
-index 0000000..9eb5216
+index 0000000..e3e45a9
 --- /dev/null
 +++ b/src/gliden64_renderer.cpp
-@@ -0,0 +1,326 @@
+@@ -0,0 +1,338 @@
 +// GLideN64-backed renderer context (OpenGL ES), selected with
 +// WR64_RENDERER=gliden64.
 +//
@@ -663,7 +663,9 @@ index 0000000..9eb5216
 +        // Bisect switch: count the display list but do not render it.
 +        static const bool skip_dl = std::getenv("WR64_SKIP_DL") != nullptr;
 +        if (!skip_dl) {
++            const uint64_t t0 = SDL_GetPerformanceCounter();
 +            plugin_.ProcessDList();
++            dl_ticks_ += SDL_GetPerformanceCounter() - t0;
 +        }
 +    }
 +
@@ -686,7 +688,9 @@ index 0000000..9eb5216
 +            return;
 +        }
 +        last_origin_ = vi_->VI_ORIGIN_REG;
++        const uint64_t t0 = SDL_GetPerformanceCounter();
 +        plugin_.UpdateScreen();
++        present_ticks_ += SDL_GetPerformanceCounter() - t0;
 +
 +        // Frame pacing report: rendered frames per second, every 5 s.
 +        ++frames_;
@@ -695,8 +699,14 @@ index 0000000..9eb5216
 +            report_at_ = now + 5000;
 +        } else if (now >= report_at_) {
 +            const double seconds = (now - report_at_ + 5000) / 1000.0;
-+            std::fprintf(stderr, "[gliden64] game %.1f frames/s (display lists), %.1f presented frames/s\n",
-+                         dls_ / seconds, frames_ / seconds);
++            const double freq = static_cast<double>(SDL_GetPerformanceFrequency());
++            std::fprintf(stderr, "[gliden64] game %.1f frames/s (display lists), %.1f presented frames/s;"
++                         " ProcessDList %.1f ms, UpdateScreen %.1f ms per frame\n",
++                         dls_ / seconds, frames_ / seconds,
++                         dls_ ? dl_ticks_ * 1000.0 / freq / dls_ : 0.0,
++                         frames_ ? present_ticks_ * 1000.0 / freq / frames_ : 0.0);
++            dl_ticks_ = 0;
++            present_ticks_ = 0;
 +            frames_ = 0;
 +            dls_ = 0;
 +            report_at_ = now + 5000;
@@ -737,6 +747,8 @@ index 0000000..9eb5216
 +    uint32_t last_origin_ = 0xFFFFFFFF;
 +    uint64_t frames_ = 0;
 +    uint64_t dls_ = 0;
++    uint64_t dl_ticks_ = 0;
++    uint64_t present_ticks_ = 0;
 +    uint64_t report_at_ = 0;
 +
 +    std::array<uint8_t, 0x40> header_{};

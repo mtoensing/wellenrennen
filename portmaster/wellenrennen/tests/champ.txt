@@ -1,0 +1,15 @@
+# Championship race without a pad: Start through title, main menu
+# (Championship is the default entry), class, rider and course, then
+# accelerate. Times are seconds since the game's first input poll.
+3.0    3.5   START   # title
+5.0    5.6   -        0 60  # main menu: cursor up to Championship
+7.0    7.5   START   # main menu: Championship
+11.0   11.5  START   # class
+15.0   15.5  START   # rider
+19.0   19.5  START   # confirm / course
+23.0   23.5  START
+27.0   27.5  START
+31.0   31.5  START
+40.0   170.0 A       0   0  # accelerate
+45.0   65.0  A      20   0
+70.0   90.0  A     -20   0

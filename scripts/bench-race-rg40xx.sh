@@ -11,7 +11,7 @@ HOST="${RG40XX_HOST:-192.168.178.76}"
 USER="${RG40XX_USER:-root}"
 
 OVERRIDES="$(printf '%s;' "$@")"
-ssh "${USER}@${HOST}" "OVERRIDES='$OVERRIDES' bash -s" <<'REMOTE'
+ssh "${USER}@${HOST}" "BENCH_SCRIPT=${BENCH_SCRIPT:-race} OVERRIDES='$OVERRIDES' bash -s" <<'REMOTE'
 GAMEDIR=/userdata/roms/ports/wellenrennen
 cd "$GAMEDIR"
 cp gliden64.ini /tmp/gliden64.ini.bench
@@ -25,7 +25,7 @@ done
 export HOME=/userdata/system XDG_DATA_HOME=/userdata/system/.local/share
 ES_PID="$(pgrep -f exit-on-reboot-required | head -1)"; kill -STOP $ES_PID
 while IFS= read -r kv; do case "$kv" in XDG_*|DBUS_*|SDL_*|HOME=*) export "$kv";; esac; done < <(tr '\0' '\n' < /proc/$ES_PID/environ)
-export WR64_INPUT_SCRIPT=$GAMEDIR/tests/race.txt
+export WR64_INPUT_SCRIPT=$GAMEDIR/tests/${BENCH_SCRIPT:-race}.txt
 timeout -k 5 -s INT 72 bash /userdata/roms/ports/Wellenrennen.sh >/dev/null 2>&1
 for p in /proc/[0-9]*; do [ "$(readlink $p/exe 2>/dev/null)" = $GAMEDIR/WaveRace64Recomp.aarch64 ] && kill -9 $(basename $p); done
 kill -CONT $ES_PID
