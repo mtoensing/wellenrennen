@@ -1,0 +1,36 @@
+{
+  "version": 4,
+  "name": "wellenrennen.zip",
+  "items": [
+    "Wellenrennen.sh",
+    "wellenrennen/"
+  ],
+  "items_opt": [],
+  "attr": {
+    "title": "Wellenrennen",
+    "porter": [
+      "mtoensing"
+    ],
+    "desc": "Jet-ski racing with the original tracks, water and analogue steering. Native ARM64 Wave Race 64 recompilation with an experimental GLES presentation path.",
+    "desc_md": null,
+    "inst": "Copy your own Wave Race 64 (USA) (Rev A) .z64 ROM into ports/wellenrennen/. Other revisions are unsupported.",
+    "inst_md": null,
+    "genres": [
+      "racing"
+    ],
+    "image": null,
+    "rtr": false,
+    "exp": true,
+    "runtime": [],
+    "store": [],
+    "availability": "paid",
+    "reqs": [
+      "analog_1",
+      "1gb"
+    ],
+    "arch": [
+      "aarch64"
+    ],
+    "min_glibc": "2.34"
+  }
+}

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<gameList>
+  <game>
+    <path>./Wellenrennen.sh</path>
+    <name>Wellenrennen</name>
+    <desc>Native ARM64 Wave Race 64 recompilation with original tracks, water and analogue steering. Requires the player's Wave Race 64 USA Rev A ROM.</desc>
+    <image>./wellenrennen/screenshot.png</image>
+    <developer>Nintendo EAD; Wave Race 64 Recompiled contributors</developer>
+    <publisher>Nintendo (original game)</publisher>
+    <genre>Racing</genre>
+    <players>1</players>
+  </game>
+</gameList>

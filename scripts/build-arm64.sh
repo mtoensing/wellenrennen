@@ -199,6 +199,8 @@ cd "$SRC"
 # RT64 only defines PLUME_SDL_VULKAN_ENABLED inside its own directory scope.
 # RecompFrontend is a sibling and would otherwise see plume's X11
 # RenderWindow while ultramodern hands it an SDL_Window*.
+# Native SDL input works without the optional PC frontend; its pinned source
+# has no published license, so exclude it from the distributable build.
 cmake -S . -B "$BUILD" -G Ninja \
   -DCMAKE_BUILD_TYPE=RelWithDebInfo \
   -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
@@ -208,7 +210,7 @@ cmake -S . -B "$BUILD" -G Ninja \
   -DCMAKE_C_FLAGS="-DPLUME_SDL_VULKAN_ENABLED" \
   -DCMAKE_CXX_FLAGS="-DPLUME_SDL_VULKAN_ENABLED" \
   -DSDL2_INCLUDE_DIRS="$(sdl2-config --cflags | sed -n 's/.*-I\([^ ]*\).*/\1/p')" \
-  -DWR64_WITH_RUNTIME=ON -DWR64_WITH_RECOMPILED=ON -DWR64_WITH_FRONTEND=ON
+  -DWR64_WITH_RUNTIME=ON -DWR64_WITH_RECOMPILED=ON -DWR64_WITH_FRONTEND=OFF
 cmake --build "$BUILD" --target WaveRace64Recomp
 
 file "$BUILD/WaveRace64Recomp"

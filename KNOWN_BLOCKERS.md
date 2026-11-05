@@ -498,3 +498,17 @@ claimed as 60 unique images/s. No PortMaster PR or public binary release made.
 Packaging follow-up: the tracked PortMaster launcher is executable (0755), so
 fresh extraction/deployment carries the entry-point permission rather than
 relying on the earlier manual chmod used during SSH tests.
+
+## 2026-11-05 — catalogue build excludes optional unlicensed frontend
+
+Pinned upstream THIRD_PARTY_NOTICES.md identifies RecompFrontend as having no
+published license. The existing WR64_WITH_FRONTEND=OFF build succeeds with
+Clang 18/RelWithDebInfo; link-command and nm inspection show no recompui,
+recompinput, RmlUi or lunasvg symbols/libraries. The stripped game is about
+11 MiB and requires glibc 2.34. PC UI fonts/assets are excluded from packaging.
+
+Real-device no-frontend test: device-logs/synth-20261105-193323-game.log.
+Native SDL controller opens, original music sequences play, menus/race/results
+run; steady race reports 19.97 native frames/s and 59.71 swaps/s. SIGTERM to
+the game produces SDL_QUIT and clean renderer/runtime shutdown. This remains
+a bounded automated test, not manual full-course or additional CFW coverage.

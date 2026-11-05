@@ -17,3 +17,12 @@ There is no PortMaster submission or completed broad-device compatibility test.
 ROM, generated `RecompiledFuncs/`, disassembly, ELF files and ROM-derived
 intermediates must remain outside git. Public CI is ROM-free; complete builds
 use the owner's supported USA Rev A ROM in the private ARM64 build volume.
+
+## PortMaster catalogue candidate
+
+[PR draft](docs/portmaster/PR.md) and [validation/open tests](docs/portmaster/READINESS.md).
+The submission build uses native SDL input with `WR64_WITH_FRONTEND=OFF`,
+excludes the optional PC frontend and UI assets, and strips debug symbols.
+`python3 scripts/prepare-portmaster.py` prepares the local catalogue directory;
+`python3 scripts/check-portmaster.py .work/PortMaster-New/ports/wellenrennen`
+checks it with the public PortMaster tools. No upstream PR is published by these scripts.

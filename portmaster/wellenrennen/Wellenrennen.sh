@@ -90,6 +90,7 @@ fi
 $ESUDO env \
   WR64_RENDERER=gliden64 \
   WR64_FRAME_SYNTH="$WR64_FRAME_SYNTH" \
+  WR64_HAPTICS=off \
   WR64_INPUT_SCRIPT="${WR64_INPUT_SCRIPT:-}" \
   WR64_GLIDEN64_PLUGIN="$GAMEDIR/gliden64/mupen64plus-video-GLideN64.so" \
   WR64_GLIDEN64_CORE="$GAMEDIR/gliden64/libwr64_m64pcore.so" \

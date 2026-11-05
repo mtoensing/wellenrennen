@@ -25,23 +25,14 @@ mv "$PORT/Wellenrennen.sh" "$STAGE/Wellenrennen.sh"
 docker run --rm -v wr64-work:/work -v "$ROOT:/repo:ro" -v "$PORT:/out" "$IMAGE" bash -c '
   set -e
   cp /work/build-arm64/WaveRace64Recomp /out/WaveRace64Recomp.aarch64
-  cp -R /work/build-arm64/assets /out/assets
-  # Baseline: original music and textures. The replacement soundtrack is
-  # decoded fully into RAM at startup (~300 MB), which leaves too little of
-  # the 1 GB for the 512 MiB librecomp RDRAM commit.
-  rm -rf /out/assets/music /out/assets/textures
+  # The native port deliberately excludes the optional unlicensed PC frontend.
+  mkdir -p /out/assets
+  cp -R /work/wave-race-64-recomp/assets/water /out/assets/water
   cp /work/build-gliden64/plugin/Release/mupen64plus-video-GLideN64.so /out/gliden64/
   cp /work/build-arm64/libwr64_m64pcore.so /out/gliden64/
-  # Licenses of everything in the binary and the plugin.
-  mkdir -p /out/licenses
-  cp /work/wave-race-64-recomp/LICENSE /out/licenses/LICENSE.WaveRace64Recompiled.txt
-  cp /work/wave-race-64-recomp/THIRD_PARTY_NOTICES.md /out/licenses/THIRD_PARTY_NOTICES.WaveRace64Recompiled.md
-  cp /work/wave-race-64-recomp/lib/RT64/LICENSE /out/licenses/LICENSE.RT64.txt
-  cp /work/GLideN64/LICENSE /out/licenses/LICENSE.GLideN64.txt
-  printf "GLideN64 (GPL-2.0) source: https://github.com/gonetz/GLideN64/tree/%s\n" \
-    "$(git -C /work/GLideN64 rev-parse HEAD)" > /out/licenses/SOURCE.GLideN64.txt
-  printf "Port modifications, including optical-flow source and patches: https://github.com/mtoensing/wellenrennen/tree/%s\n" \
-    "$(git -c safe.directory=/repo -C /repo rev-parse HEAD)" >> /out/licenses/SOURCE.GLideN64.txt
+  strip --strip-debug /out/WaveRace64Recomp.aarch64 /out/gliden64/*.so
+  python3 /repo/scripts/collect-portmaster-licenses.py /out/licenses
+  printf "{\"frontend\": false, \"profile\": \"native-gles\"}\n" > /out/build-info.json
 '
 
 ( cd "$STAGE" && zip -qr "$ROOT/dist/wellenrennen.zip" Wellenrennen.sh wellenrennen )
