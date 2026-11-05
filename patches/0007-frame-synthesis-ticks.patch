@@ -1,0 +1,37 @@
+--- a/src/gliden64_renderer.cpp
++++ b/src/gliden64_renderer.cpp
+@@ -68,6 +68,8 @@
+     void (*CommandProbeBegin)() = nullptr;
+     void (*CommandProbeEnd)() = nullptr;
+     void (*UpdateScreen)() = nullptr;
++    void (*FrameSynthTick)() = nullptr;
++    void (*FrameSynthBegin)(int) = nullptr;
+     void (*ViStatusChanged)() = nullptr;
+     void (*ViWidthChanged)() = nullptr;
+     // Optional: frame interpolation (patches/gliden64-0001).
+@@ -98,6 +100,8 @@
+         CommandProbeEnd = reinterpret_cast<void (*)()>(dlsym(handle, "CommandProbeEnd"));
+         RenderProbeFinish = reinterpret_cast<void (*)()>(dlsym(handle, "RenderProbeFinish"));
+         get(UpdateScreen, "UpdateScreen");
++        FrameSynthBegin = reinterpret_cast<void (*)(int)>(dlsym(handle, "FrameSynthBegin"));
++        FrameSynthTick = reinterpret_cast<void (*)()>(dlsym(handle, "FrameSynthTick"));
+         get(ViStatusChanged, "ViStatusChanged");
+         get(ViWidthChanged, "ViWidthChanged");
+         InterpNewFrame = reinterpret_cast<void (*)()>(dlsym(handle, "InterpNewFrame"));
+@@ -216,6 +220,7 @@
+             return;
+         }
+         notice_vi_changes();
++        if(std::getenv("WR64_FRAME_SYNTH") && plugin_.FrameSynthBegin) plugin_.FrameSynthBegin(frame_divider());
+         frame_task_ = *task;
+         have_frame_ = true;
+ 
+@@ -331,6 +336,8 @@
+             if (vi_->VI_ORIGIN_REG != last_origin_) {
+                 last_origin_ = vi_->VI_ORIGIN_REG;
+                 present();
++            } else if (std::getenv("WR64_FRAME_SYNTH") && plugin_.FrameSynthTick) {
++                plugin_.FrameSynthTick();
+             }
+             return;
+         }

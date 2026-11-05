@@ -22,7 +22,7 @@ cp -R "$ROOT/portmaster/wellenrennen/." "$PORT/"
 mv "$PORT/Wellenrennen.sh" "$STAGE/Wellenrennen.sh"
 
 # Binary, the assets CMake staged beside it, and the renderer plugin.
-docker run --rm -v wr64-work:/work -v "$PORT:/out" "$IMAGE" bash -c '
+docker run --rm -v wr64-work:/work -v "$ROOT:/repo:ro" -v "$PORT:/out" "$IMAGE" bash -c '
   set -e
   cp /work/build-arm64/WaveRace64Recomp /out/WaveRace64Recomp.aarch64
   cp -R /work/build-arm64/assets /out/assets
@@ -40,6 +40,8 @@ docker run --rm -v wr64-work:/work -v "$PORT:/out" "$IMAGE" bash -c '
   cp /work/GLideN64/LICENSE /out/licenses/LICENSE.GLideN64.txt
   printf "GLideN64 (GPL-2.0) source: https://github.com/gonetz/GLideN64/tree/%s\n" \
     "$(git -C /work/GLideN64 rev-parse HEAD)" > /out/licenses/SOURCE.GLideN64.txt
+  printf "Port modifications, including optical-flow source and patches: https://github.com/mtoensing/wellenrennen/tree/%s\n" \
+    "$(git -c safe.directory=/repo -C /repo rev-parse HEAD)" >> /out/licenses/SOURCE.GLideN64.txt
 '
 
 ( cd "$STAGE" && zip -qr "$ROOT/dist/wellenrennen.zip" Wellenrennen.sh wellenrennen )

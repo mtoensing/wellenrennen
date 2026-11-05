@@ -1,0 +1,98 @@
+--- a/src/Graphics/OpenGLContext/ThreadedOpenGl/opengl_WrappedFunctions.h
++++ b/src/Graphics/OpenGLContext/ThreadedOpenGl/opengl_WrappedFunctions.h
+@@ -5269,6 +5269,8 @@
+ 	int* m_value;
+ };
+ 
++bool wr64_synth_swap();
++
+ class CoreVideoGLSwapBuffersCommand : public OpenGlCommand
+ {
+ public:
+@@ -5287,7 +5289,7 @@
+ 
+ 	void commandToExecute() override
+ 	{
+-		::CoreVideo_GL_SwapBuffers();
++        if (!wr64_synth_swap()) ::CoreVideo_GL_SwapBuffers();
+ 		m_swapBuffersCallback();
+ 	}
+ 
+--- a/src/Graphics/OpenGLContext/ThreadedOpenGl/opengl_Wrapper.h
++++ b/src/Graphics/OpenGLContext/ThreadedOpenGl/opengl_Wrapper.h
+@@ -19,6 +19,8 @@
+ 	class FunctionWrapper
+ 	{
+     public:
++        static void synthTick();
++        static void synthBegin(int divider);
+         static void probeBegin();
+         static void probeEnd();
+ 	private:
+--- a/src/Graphics/OpenGLContext/ThreadedOpenGl/opengl_Wrapper.cpp
++++ b/src/Graphics/OpenGLContext/ThreadedOpenGl/opengl_Wrapper.cpp
+@@ -3,10 +3,34 @@
+ #include "Graphics/OpenGLContext/GLFunctions.h"
+ #include <memory>
+ #include <set>
++#include "Wr64FrameSynth.h"
+ #include <chrono>
+ #include <cstdio>
+ 
+ namespace opengl {
++bool wr64_synth_swap() { return ::wr64_synth_swap(); }
++namespace {
++std::atomic<bool> synthPending{false};
++class SynthBeginCommand final : public OpenGlCommand {
++public:
++    explicit SynthBeginCommand(int divider) : OpenGlCommand(false,false,"frameSynthBegin",false),divider_(divider) {}
++    void commandToExecute() override { ::wr64_synth_begin(divider_); }
++private: int divider_;
++};
++class SynthTickCommand final : public OpenGlCommand {
++public:
++    SynthTickCommand() : OpenGlCommand(false,false,"frameSynthTick",false) {}
++    void commandToExecute() override { ::wr64_synth_tick();synthPending.store(false); }
++};
++}
++void FunctionWrapper::synthBegin(int divider) {
++    if(m_threaded_wrapper)executeCommand(std::make_shared<SynthBeginCommand>(divider));
++}
++void FunctionWrapper::synthTick() {
++    if (m_threaded_wrapper && !synthPending.exchange(true))
++        executeCommand(std::make_shared<SynthTickCommand>());
++}
++
+ namespace {
+ bool probeCapture = false;
+ bool probeUnsafe = false;
+@@ -133,7 +157,8 @@
+ 	{
+ 		bool timeToShutdown = false;
+ 		while (!timeToShutdown) {
+-			std::shared_ptr<OpenGlCommand> command;
++            if(wr64_synth::enabled())::wr64_synth_tick();
++            std::shared_ptr<OpenGlCommand> command;
+ 
+ 			if (m_commandQueueHighPriority.peek() != nullptr) {
+ 				while (m_commandQueueHighPriority.try_dequeue(command)) {
+@@ -141,7 +166,7 @@
+                     command->performCommand();
+ 				}
+ 			} else {
+-				if (m_commandQueue.wait_dequeue_timed(command, std::chrono::milliseconds(10)) && command != nullptr) {
++				if (m_commandQueue.wait_dequeue_timed(command, std::chrono::microseconds(wr64_synth::enabled()?500:10000)) && command != nullptr) {
+                     if (probeCapture && command->probeEligible()) {
+                         const auto& name = command->probeName();
+                         // Deletions invalidate resource handles retained by earlier calls.
+--- a/src/MupenPlusPluginAPI.cpp
++++ b/src/MupenPlusPluginAPI.cpp
+@@ -13,6 +13,8 @@
+ EXPORT void CALL InterpBeginDList(float t) { GLideN64_InterpBeginDList(t); }
+ 
+ // Diagnostic barrier: includes execution on the GL worker and GPU completion.
++EXPORT void CALL FrameSynthBegin(int divider) { opengl::FunctionWrapper::synthBegin(divider); }
++EXPORT void CALL FrameSynthTick(void) { opengl::FunctionWrapper::synthTick(); }
+ EXPORT void CALL CommandProbeBegin(void) { opengl::FunctionWrapper::probeBegin(); }
+ EXPORT void CALL CommandProbeEnd(void) { opengl::FunctionWrapper::probeEnd(); }
+ EXPORT void CALL RenderProbeFinish(void) { opengl::FunctionWrapper::wrFinish(); }

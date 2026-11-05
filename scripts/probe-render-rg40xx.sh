@@ -18,7 +18,7 @@ while IFS= read -r kv; do
   case "$kv" in XDG_*|DBUS_*|SDL_*|HOME=*) export "$kv";; esac
 done < <(tr '\0' '\n' < "/proc/$ES_PID/environ")
 cleanup() {
-  pkill -INT -f '^/userdata/roms/ports/wellenrennen/WaveRace64Recomp' 2>/dev/null || true
+  pkill -TERM -f '^/userdata/roms/ports/wellenrennen/WaveRace64Recomp' 2>/dev/null || true
   kill -CONT "$ES_PID" 2>/dev/null || true
 }
 trap cleanup EXIT HUP INT TERM
@@ -29,7 +29,7 @@ export WR64_INPUT_SCRIPT="$GAMEDIR/tests/race.txt"
 unset WR64_INTERP
 uname -a
 sha256sum "$GAMEDIR/WaveRace64Recomp.aarch64" "$GAMEDIR/gliden64/mupen64plus-video-GLideN64.so"
-timeout -k 10 -s INT 80 bash /userdata/roms/ports/Wellenrennen.sh >/dev/null 2>&1
+timeout -k 10 -s TERM 80 bash /userdata/roms/ports/Wellenrennen.sh >/dev/null 2>&1
 rc=$?
 echo "launcher termination=$rc (124: deliberately stopped at 80 s)"
 grep -aE 'command-probe|render-probe|frames/s|state:|audio device|renderer ready|UNKNOWN GBI|invalid size' "$GAMEDIR/log.txt"

@@ -1,35 +1,43 @@
 ## Wellenrennen
 
 Experimental PortMaster/aarch64 port of
-[Wave Race 64: Recompiled](https://github.com/elliotttate/wave-race-64-recomp).
-
-This package contains no Nintendo ROM data. Like upstream's own Windows and
-macOS releases, the executable contains game code statically recompiled from
-the ROM; the game still needs your ROM at runtime.
+[Wave Race 64: Recompiled](https://github.com/elliotttate/wave-race-64-recomp)
+for the Anbernic RG40XX H under KNULLI.
 
 ### ROM
 
-Copy your own legally obtained **Wave Race 64 (USA) (Rev A)** ROM (`.z64`)
-into `ports/wellenrennen/`.
+Copy your own **Wave Race 64 (USA) (Rev A)** `.z64` ROM into
+`ports/wellenrennen/`. SHA-1: `508dfc2d4caa42b6f6de5263d0aed5e44ac7966a`.
+Other revisions are unsupported by this pinned recompilation. No ROM or
+extracted game assets are included; the executable contains statically
+recompiled game code and still requires your ROM at runtime.
 
-Expected SHA-1: `508dfc2d4caa42b6f6de5263d0aed5e44ac7966a`
+### Graphics and timing
 
-Other revisions are not supported by the pinned recompilation.
+The port uses the CFW's SDL2 and OpenGL ES with GLideN64. Original water,
+textures and music; native scene resolution, 4:3, no MSAA or texture packs.
 
-### Renderer
+The new presentation path targets the panel's nominal 60 Hz using GPU optical
+flow. Race simulation stays at the original rate (20 Hz in the tested mode).
+Scene pixels are synthesized at 320x240 and composed at 640x480; HUD text stays
+native. This adds roughly one game-frame interval of display latency and can
+produce artifacts at foam, occlusions or rapid movement. It is image-space
+frame generation, not RT64 geometry interpolation. Native 30 Hz UI/results
+modes bypass it to preserve their correct speed.
 
-Upstream renders with RT64, which needs Vulkan. The Mali GLES drivers of
-H700 CFWs have no Vulkan, so this port renders through the
-[GLideN64](https://github.com/gonetz/GLideN64) plugin on OpenGL ES 3 with the
-CFW's own SDL2. Its settings are in `gliden64.ini` (native 320x240, no
-anti-aliasing, threaded video). Original water, textures and music; no
-rumble.
+On H700, the launcher temporarily requests the CFW's highest advertised GPU
+operating point, within any existing maximum limit, and restores the previous
+minimum on exit. No driver, firmware, governor or overclock is installed.
+`WR64_FRAME_SYNTH=0` disables the new path for a baseline development launch.
 
 ### Status
 
-Tested on an Anbernic RG40XX H (H700, Mali-G31, 1 GB) with KNULLI:
-menus, a full race and the results screen, with audio. Races and menus hold
-the 20 frames/s the game requests once the shader cache is built (the first
-session compiles shaders and stutters; exit with the hotkey so the cache is
-saved). Short dips to 16-18 frames/s remain around the race start.
-Not yet tested on other devices or CFWs.
+Hardware tests reach menus, an automated championship race and the results
+screen with non-silent audio output. The automated route can be disqualified;
+it is not proof of a correctly completed full course. Short sections reach the
+nominal 60 Hz panel cadence with the original game rate. Check the repository's
+`KNOWN_BLOCKERS.md` for final measurements and remaining limitations. Other
+hardware/CFWs and manual full-race control verification are outside these tests.
+
+Exit with the normal PortMaster hotkey so the renderer can save its shader
+cache. Initial shader compilation/loading can stutter.

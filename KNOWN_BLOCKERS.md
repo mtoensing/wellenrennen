@@ -404,3 +404,93 @@ reports 14.8–16.5 game frames/s around race start and two later windows at
 20.0 game / 20.0 presentation calls per second. Those are software counters,
 not a measurement of unique physical display frames. The game was stopped
 after the bounded test and EmulationStation was confirmed resumed (`Sl`).
+
+## 2026-11-05 — GLES frame synthesis bring-up (not a locked-60 claim)
+
+The 60 Hz experiment now has a separate image-space path in
+`renderer/Wr64FrameSynth.h`, connected by Wave Race patch 0007 and GLideN64
+patch 0004. It captures completed native images, estimates displacement on
+small images, and warps scene pixels between them. It never changes the VI
+thread, cartridge divider, or physics. Normal 30+ Hz UI modes bypass synthesis
+so their native simulation is not slowed by the extra work.
+
+Reproduced and corrected during bring-up:
+
+- Polling presentation on every GL-worker loop iteration with a deadline based
+  only on swap submission starved native GL work when fbdev swaps blocked for
+  about 16.7 ms: logs showed ~59.7 swaps/s but 0 native frames/s. This is not
+  gameplay success. A work interval after blocking swaps restores native work.
+- The new image-space passes originally disabled/restored blending through the
+  generic GL_BLEND API while GLideN64 uses indexed blend state. In the race,
+  intermediate textures became black and native/composited images developed
+  trails. Using the same indexed API (`glIsEnabledi`, `glDisablei`, `glEnablei`,
+  draw buffer 0) gives populated motion/low-resolution images and clean native
+  images in the same race route. Evidence before/after:
+  `device-logs/synth-20261105-182305-dump/` and
+  `device-logs/synth-20261105-183054-dump/`.
+- An early small-attachment dump was all zero with GL_OUT_OF_MEMORY (0x505)
+  pending; subsequent validation uses enlarged views through the 640x480 default
+  target. The small readback path is not proven reliable. Do not infer empty
+  GPU textures from that failed dump alone. The indexed-blend correction was
+  independently checked through full-size race dumps.
+- Full framebuffer snapshots are expensive enough to interfere with cadence:
+  the first 12 snapshots in `synth-20261105-180740-cadence.txt` were separated
+  by roughly 0.13–0.18 s. Snapshot/diagnostic runs are not stability runs.
+- A stable-hash sampler without VBlank synchronization undercounted updates.
+  `FBIO_WAITFORVSYNC` is available. A five-second VBlank-synchronized run
+  without image dumps recorded 297 distinct images in 5.004 s (~59.36/s),
+  alongside ~20 native frames/s. This is a short section, not a full-race proof:
+  `device-logs/synth-gpu696-fb-vsync.txt`.
+- The device advertises 240/336/420/504/600/696 MHz GPU operating points.
+  A temporary 696 MHz minimum improves the new path; test cleanup restored the
+  previous 0 minimum. No overclock, driver, firmware or governor replacement.
+- Killing only the game with SIGTERM leaves the launcher/log process alive and
+  produces `SDL_QUIT received`, `shutting down (writes the shader cache)`, and
+  `runtime shut down`, launcher exit 0. Keep this distinction from a timeout
+  that signals the whole launcher group. Reproduced by the 12-second run logged
+  in `device-logs/synth-20261105-184211-game.log`.
+
+Latest passes add color-guided flow upsampling, reject mismatched silhouettes,
+protect the HUD and black borders, and synthesize scene pixels at the original
+320x240 before 640x480 composition. They still require a final stability run
+without dumps and a review of interpolation artifacts. Do not report a full
+race completed correctly or locked 60 Hz from the sparse counters above.
+
+## 2026-11-05 — nominal-60 race presentation verified on RG40XX H
+
+Final pacing gives native GL commands a 13 ms work interval after a blocking
+fbdev swap. This reduces native starvation relative to the earlier 10 ms
+interval. The regular PortMaster launcher enables synthesis and temporarily
+raises only H700's GPU minimum to an advertised operating point (696 MHz on
+this device), respecting a nonzero CFW maximum and restoring the old minimum.
+
+Hardware evidence, using the real launcher, warm shader cache, no shader-query
+profiling, no GPU dumps and no full framebuffer snapshots:
+
+- `device-logs/synth-20261105-185420-game.log`: tested race holds approximately
+  20 native game frames/s (19.97–20.17 in the steady race reports) and 59.71–59.72
+  swap calls/s. Native 30 Hz results mode bypasses synthesis and reaches 30/30.
+- `device-logs/synth-budget13-cadence.txt`: VBlank-synchronized, RGB-only sparse
+  front-buffer sampling during moving race gameplay, 897 distinct images in
+  15.007 s = 59.773 images/s. Median interval 16.746 ms, p95 16.867 ms, maximum
+  18.862 ms, zero gaps greater than 25 ms. This is the panel's nominal 60 Hz
+  cadence, not a 60 Hz simulation claim.
+- Full-size source/motion/phase dumps from the indexed-blend and guided-flow
+  runs show populated motion fields and generated intermediate images. The
+  final path warps at the game's 320x240 scene resolution, composes at 640x480,
+  preserves the HUD, and rejects mismatched silhouettes/black-border sampling.
+- The benchmark now signals the game only. Logs confirm SDL_QUIT, renderer
+  shutdown, shader-cache handling and runtime shutdown, launcher exit 0.
+  The shader store grew from 263,978 to 445,242 bytes after a full clean race
+  shutdown; later tests reuse it. Whole-launcher-group termination did not give
+  equivalent clean-shutdown evidence.
+- Game stopped after the bounded test; EmulationStation resumed (`Sl`), GPU
+  minimum restored to 0. Previous stock-maximum test telemetry was about 55 C;
+  no driver, firmware, overclock or permanent system change was installed.
+
+Limits: this is a measured 15-second moving-race section, not a guarantee for
+all tracks or a verified correctly completed full course. Race-entry/loading
+still reports below-target native rates before the steady section. Optical-flow
+synthesis adds latency and can show occlusion/water artifacts; it is not RT64
+geometry interpolation. Results/UI at native 30 Hz are intentionally not
+claimed as 60 unique images/s. No PortMaster PR or public binary release made.

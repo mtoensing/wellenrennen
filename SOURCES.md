@@ -35,3 +35,12 @@ Pinned submodules at that upstream revision:
   `patches/0001-arm64-linux-dxc.patch` changes only that selection.
 - RT64's SDL Vulkan window path is enabled with
   `RT64_SDL_WINDOW_VULKAN=ON`.
+
+## GLES image-space presentation experiment
+
+`renderer/Wr64FrameSynth.h` and `patches/gliden64-0004-frame-synthesis.patch`
+add the optional optical-flow presentation path to the pinned GLideN64 plugin.
+`patches/0007-frame-synthesis-ticks.patch` connects the cartridge frame divider
+and native-frame boundaries. This code does not alter game simulation timing or
+contain ROM-derived code/assets. It is built into the GPL-2.0 GLideN64 plugin;
+the complete modifications and build scripts are kept in this repository.
