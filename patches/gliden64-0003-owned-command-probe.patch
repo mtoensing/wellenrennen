@@ -1,0 +1,268 @@
+--- a/src/Graphics/OpenGLContext/ThreadedOpenGl/RingBufferPool.h
++++ b/src/Graphics/OpenGLContext/ThreadedOpenGl/RingBufferPool.h
+@@ -1,6 +1,8 @@
+ #pragma once
+ 
+ #include <memory>
++#include <map>
++#include <cstdint>
+ #include <vector>
+ #include <atomic>
+ #include <mutex>
+@@ -20,6 +22,7 @@
+ private:
+ 	PoolBufferPointer(size_t _offset, size_t _size, size_t _realSize, bool _isValid);
+ 
++	uint64_t m_serial = 0;
+ 	size_t m_offset;
+ 	size_t m_size;
+ 	size_t m_realSize;
+@@ -33,6 +36,11 @@
+ public:
+ 
+ 	explicit RingBufferPool(size_t _poolSize);
++    // GL-worker-only owned data for the bounded frozen-frame diagnostic.
++    void probeBegin() { m_probeBuffers.clear(); m_probeCapture = true; }
++    void probeReplay() { m_probeCapture = false; m_probeReplay = true; }
++    void probeEnd() { m_probeCapture = m_probeReplay = false; m_probeBuffers.clear(); }
++    size_t probeBytes() const { size_t n=0; for (const auto& b : m_probeBuffers) n += b.second.size(); return n; }
+ 
+ 	// Create a buffer pool. This method will block if there is not enough space until
+ 	// enough space has been freed from a seperate thread. If a buffer bigger than the
+@@ -48,7 +56,10 @@
+ 	void removeBufferFromPool(PoolBufferPointer _poolBufferPointer);
+ 
+ private:
+-	std::atomic<size_t> m_inUseStartOffset;
++	uint64_t m_nextSerial = 0; // single producer
++    bool m_probeCapture = false, m_probeReplay = false; // single GL consumer
++    std::map<uint64_t, std::vector<char>> m_probeBuffers;
++    std::atomic<size_t> m_inUseStartOffset;
+ 	std::atomic<size_t> m_inUseEndOffset;
+ 	std::vector<char> m_poolBuffer;
+ 	std::mutex m_mutex;
+--- a/src/Graphics/OpenGLContext/ThreadedOpenGl/RingBufferPool.cpp
++++ b/src/Graphics/OpenGLContext/ThreadedOpenGl/RingBufferPool.cpp
+@@ -25,6 +25,7 @@
+ }
+ 
+ PoolBufferPointer::PoolBufferPointer(const PoolBufferPointer& other) :
++	m_serial(other.m_serial),
+ 	m_offset(other.m_offset),
+ 	m_size(other.m_size),
+ 	m_realSize(other.m_realSize),
+@@ -34,6 +35,7 @@
+ 
+ PoolBufferPointer& PoolBufferPointer::operator=(const PoolBufferPointer& other)
+ {
++	m_serial = other.m_serial;
+ 	m_offset = other.m_offset;
+ 	m_size = other.m_size;
+ 	m_realSize = other.m_realSize;
+@@ -169,7 +171,9 @@
+ 
+ 	m_full = m_inUseEndOffset == tempInUseStart;
+ 
+-	return PoolBufferPointer(startOffset, _bufferSize, realBufferSize, isValid);
++	PoolBufferPointer result(startOffset, _bufferSize, realBufferSize, isValid);
++    result.m_serial = ++m_nextSerial;
++    return result;
+ }
+ 
+ const char* RingBufferPool::getBufferFromPool(PoolBufferPointer _poolBufferPointer)
+@@ -178,12 +182,20 @@
+ 		return nullptr;
+ 	} else {
+ 		std::unique_lock<std::mutex> lock(m_mutex);
+-		return m_poolBuffer.data() + _poolBufferPointer.m_offset;
++		if (m_probeReplay)
++            return m_probeBuffers.at(_poolBufferPointer.m_serial).data();
++        if (m_probeCapture) {
++            const char* p = m_poolBuffer.data() + _poolBufferPointer.m_offset;
++            m_probeBuffers.emplace(_poolBufferPointer.m_serial,
++                std::vector<char>(p, p + _poolBufferPointer.m_size));
++        }
++        return m_poolBuffer.data() + _poolBufferPointer.m_offset;
+ 	}
+ }
+ 
+ void RingBufferPool::removeBufferFromPool(PoolBufferPointer _poolBufferPointer)
+ {
++	if (m_probeReplay) return;
+ 	if (_poolBufferPointer.isValid()) {
+ 		std::unique_lock<std::mutex> lock(m_mutex);
+ 		m_inUseStartOffset = _poolBufferPointer.m_offset + _poolBufferPointer.m_realSize;
+--- a/src/Graphics/OpenGLContext/ThreadedOpenGl/opengl_Command.h
++++ b/src/Graphics/OpenGLContext/ThreadedOpenGl/opengl_Command.h
+@@ -14,6 +14,11 @@
+ 	class OpenGlCommand : public PoolObject {
+ 	public:
+ 		void performCommandSingleThreaded();
++        bool probeEligible() const { return !m_synced && m_probeGl; }
++        void probeRetain() { m_probeRetained = true; }
++        void probeRelease() { m_probeRetained = false; setInUse(false); }
++        void probeReplay() { commandToExecute(); }
++        const std::string& probeName() const { return m_probeName; }
+ 
+ 		void performCommand();
+ 
+@@ -51,7 +56,10 @@
+ #endif
+ 
+ 	private:
+-		std::atomic<bool> m_synced;
++		bool m_probeRetained = false;
++        const bool m_probeGl;
++        const std::string m_probeName;
++        std::atomic<bool> m_synced;
+ 		bool m_executed;
+ 		std::mutex m_condvarMutex;
+ 		std::condition_variable m_condition;
+--- a/src/Graphics/OpenGLContext/ThreadedOpenGl/opengl_Command.cpp
++++ b/src/Graphics/OpenGLContext/ThreadedOpenGl/opengl_Command.cpp
+@@ -12,7 +12,7 @@
+ 	{
+ 		commandToExecute();
+ 
+-		setInUse(false);
++		if (!m_probeRetained) setInUse(false);
+ #ifdef GL_DEBUG
+ 		if (m_isGlCommand) {
+ 			auto error = ptrGetError();
+@@ -66,7 +66,7 @@
+ #endif
+ 	OpenGlCommand::OpenGlCommand(bool _synced, bool _logIfSynced, const std::string &_functionName,
+ 		bool _isGlCommand) :
+-		m_synced(_synced), m_executed(false)
++		m_probeGl(_isGlCommand), m_probeName(_functionName), m_synced(_synced), m_executed(false)
+ #ifdef GL_DEBUG
+ 		, m_logIfSynced(_logIfSynced)
+ 		, m_functionName(std::move(_functionName))
+--- a/src/Graphics/OpenGLContext/ThreadedOpenGl/opengl_Wrapper.h
++++ b/src/Graphics/OpenGLContext/ThreadedOpenGl/opengl_Wrapper.h
+@@ -18,6 +18,9 @@
+ 
+ 	class FunctionWrapper
+ 	{
++    public:
++        static void probeBegin();
++        static void probeEnd();
+ 	private:
+ 		static void executeCommand(std::shared_ptr<OpenGlCommand> _command);
+ 
+--- a/src/Graphics/OpenGLContext/ThreadedOpenGl/opengl_Wrapper.cpp
++++ b/src/Graphics/OpenGLContext/ThreadedOpenGl/opengl_Wrapper.cpp
+@@ -3,8 +3,77 @@
+ #include "Graphics/OpenGLContext/GLFunctions.h"
+ #include <memory>
+ #include <set>
++#include <chrono>
++#include <cstdio>
+ 
+ namespace opengl {
++namespace {
++bool probeCapture = false;
++bool probeUnsafe = false;
++std::vector<std::shared_ptr<OpenGlCommand>> probeCommands;
++// Runs barriers on the GL worker; never retains caller stack references.
++class ProbeBarrier final : public OpenGlCommand {
++public:
++    explicit ProbeBarrier(bool begin) : OpenGlCommand(true, false, "probeBarrier", false), begin_(begin) {}
++    void commandToExecute() override {
++        if (begin_) {
++            probeUnsafe = false;
++            probeCommands.clear();
++            m_ringBufferPool.probeBegin();
++            probeCapture = true;
++            return;
++        }
++        probeCapture = false;
++        ptrFinish();
++        const auto emptyStart = std::chrono::steady_clock::now();
++        ptrFinish();
++        const double emptyMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now()-emptyStart).count();
++        const size_t bytes = m_ringBufferPool.probeBytes();
++        m_ringBufferPool.probeReplay();
++        auto start = std::chrono::steady_clock::now();
++        if (!probeUnsafe) {
++            for (int pass = 0; pass < 2; ++pass)
++                for (auto& command : probeCommands) command->probeReplay();
++            ptrFinish();
++        }
++        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now()-start).count();
++        const auto noDrawStart = std::chrono::steady_clock::now();
++        unsigned draws = 0;
++        if (!probeUnsafe) {
++            for (int pass = 0; pass < 2; ++pass) {
++                for (auto& command : probeCommands) {
++                    const auto& name = command->probeName();
++                    if (name.find("glDrawArrays") == 0 || name.find("glDrawElements") == 0) { ++draws; continue; }
++                    command->probeReplay();
++                }
++            }
++            ptrFinish();
++        }
++        const double noDrawMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now()-noDrawStart).count();
++        static unsigned samples = 0;
++        if (++samples % 20 == 0) {
++            std::fprintf(stderr, "[command-probe] two cached renders %.3f ms, mean %.3f ms/render; %zu commands, %zu owned bytes, unsafe=%d; excludes HLE and swaps\n", ms, ms/2, probeCommands.size(), bytes, probeUnsafe);
++            std::fprintf(stderr, "[command-probe] no-draw pair %.3f ms, omitted %u draw calls; empty GPU barrier %.3f ms\n", noDrawMs, draws, emptyMs);
++            std::map<std::string, unsigned> histogram;
++            for (const auto& command : probeCommands) ++histogram[command->probeName()];
++            for (const auto& h : histogram) if (h.second >= 100)
++                std::fprintf(stderr, "[command-probe] %s %u calls/frame\n", h.first.c_str(), h.second);
++        }
++        m_ringBufferPool.probeEnd();
++        for (auto& command : probeCommands) command->probeRelease();
++        probeCommands.clear();
++    }
++private:
++    bool begin_;
++};
++}
++void FunctionWrapper::probeBegin() {
++    if (m_threaded_wrapper) executeCommand(std::make_shared<ProbeBarrier>(true));
++}
++void FunctionWrapper::probeEnd() {
++    if (m_threaded_wrapper) executeCommand(std::make_shared<ProbeBarrier>(false));
++}
++
+ 
+ 	bool FunctionWrapper::m_threaded_wrapper = false;
+ 	std::atomic<bool> FunctionWrapper::m_shutdown{false};
+@@ -68,12 +137,21 @@
+ 
+ 			if (m_commandQueueHighPriority.peek() != nullptr) {
+ 				while (m_commandQueueHighPriority.try_dequeue(command)) {
+-					command->performCommand();
++                    if (probeCapture) probeUnsafe = true;
++                    command->performCommand();
+ 				}
+ 			} else {
+ 				if (m_commandQueue.wait_dequeue_timed(command, std::chrono::milliseconds(10)) && command != nullptr) {
+-					command->performCommand();
+-					timeToShutdown = command->isTimeToShutdown();
++                    if (probeCapture && command->probeEligible()) {
++                        const auto& name = command->probeName();
++                        // Deletions invalidate resource handles retained by earlier calls.
++                        if (name.find("Delete") != std::string::npos || probeCommands.size() >= 50000)
++                            probeUnsafe = true;
++                        command->probeRetain();
++                        probeCommands.push_back(command);
++                    }
++                    command->performCommand();
++                    timeToShutdown = command->isTimeToShutdown();
+ 				}
+ 			}
+ 		}
+--- a/src/MupenPlusPluginAPI.cpp
++++ b/src/MupenPlusPluginAPI.cpp
+@@ -13,6 +13,8 @@
+ EXPORT void CALL InterpBeginDList(float t) { GLideN64_InterpBeginDList(t); }
+ 
+ // Diagnostic barrier: includes execution on the GL worker and GPU completion.
++EXPORT void CALL CommandProbeBegin(void) { opengl::FunctionWrapper::probeBegin(); }
++EXPORT void CALL CommandProbeEnd(void) { opengl::FunctionWrapper::probeEnd(); }
+ EXPORT void CALL RenderProbeFinish(void) { opengl::FunctionWrapper::wrFinish(); }
+ 
+ EXPORT int CALL RomOpen(void)

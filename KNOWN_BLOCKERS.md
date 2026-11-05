@@ -352,3 +352,55 @@ Therefore off by default. A working version would have to render all
 in-between frames before DP-complete into separate targets and present them
 on later VIs (deeper GLideN64 changes), and would still need the race frame
 to render at least ~2x faster than now.
+
+## 2026-11-05 — owned GL command replay does not meet the 60 Hz budget
+
+Real RG40XX H reachable at the configured host: KNULLI/Batocera 42,
+Linux 4.9.170, aarch64, hardware GLES 3.2 / Mali-G31 r20p0. The old game
+installation was absent; deployed the existing package and preserved/copied the
+supported user ROM locally on the device. Build environment and pinned sources
+remain available in the `wr64-work` ARM64 Docker volume.
+
+Added opt-in, pre-DP-complete diagnostics (patches 0005/0006 and GLideN64
+0002/0003), built with the existing optimized Clang configuration:
+
+- Full HLE triple render, enabled only after 45 s so the automated route reaches
+  the race: 61.010–73.970 ms per render across seven printed samples. A single
+  synchronous GL-worker/GPU completion barrier follows each three-render batch;
+  there are no additional swaps. Device log:
+  `device-logs/render-probe-20261105-173939.log`.
+- Owned command replay: one HLE pass records GL commands; two immediate replay
+  passes run on the GL worker before DP-complete. Command objects stay reserved;
+  ring-buffer uploads have independent copies keyed by allocation serial.
+  Persistent VBO contents are used only while the original task is still owned.
+  It does not retain a scene across game frames.
+- With per-command counts and no-draw control, six valid printed samples cost
+  67.386–80.957 ms per cached render. The source frames contain 1,080–1,183
+  `glDrawArrays` calls and 2,835–3,580 retained commands. One unsafe sample was
+  rejected (`unsafe=1`, zero replays); its zero timing is not a performance result.
+- The same replay with draw-array/element calls omitted costs 4.788–8.249 ms
+  for two passes. An immediately repeated empty `glFinish` costs 0.014–0.043 ms.
+  This separates the draw workload from the inexpensive empty barrier; it does
+  not establish a particular shader/geometry/driver bottleneck inside each draw.
+  Device log: `device-logs/render-probe-20261105-174339-game.log`.
+- Both measured runs reached `TIME_TRIAL (mode CHAMPIONSHIP, phase 0)` around
+  t=41.6 s. They ended deliberately at 80 s (launcher status 124). No displayed
+  60 Hz frame pacing or interpolation was implemented/proven by these probes.
+- A framebuffer capture during the command run shows the race start. That
+  screenshot is not validation of every replay's GL state/resource equivalence.
+- During a run: CPU 1,512 MHz, GPU 240 MHz, thermal readings around 45–46 C.
+  No clock, governor, driver or CFW changes were made.
+
+The command-only experiment excludes additional presentation and interpolation
+cost and still exceeds 16.67 ms in these samples. Caching the current GL command
+stream alone is therefore not a demonstrated route to 60 Hz. The next renderer
+experiment must reduce draw work, rather than repeating this unchanged stream.
+The diagnostics are off on normal launches. No new decomp fork or upstream
+revision change was needed for this test; no public release or upstream PR made.
+
+Final regression run with both probe environment variables unset:
+`device-logs/baseline-final-20261105-game.log` reaches the race at t=41.62 s,
+reports 14.8–16.5 game frames/s around race start and two later windows at
+20.0 game / 20.0 presentation calls per second. Those are software counters,
+not a measurement of unique physical display frames. The game was stopped
+after the bounded test and EmulationStation was confirmed resumed (`Sl`).

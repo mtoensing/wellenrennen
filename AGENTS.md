@@ -1,5 +1,16 @@
 # Wellenrennen — PortMaster ARM64 bring-up
 
+## Owner scope update — 2026-11-05
+
+The owner now prioritizes 60 FPS presentation on the RG40XX H and explicitly
+authorizes substantial optimization and renderer rewrites, and a suitable
+decomp fork if needed. The earlier bring-up-only restrictions on optimization
+and redesign are superseded by that instruction. Keep simulation timing correct,
+ROM-derived data outside git, stock CFW libraries, real-device validation, and
+work on `prototype/rg40xx`. Existing evidence in `KNOWN_BLOCKERS.md` takes
+precedence over the original assumed 30 Hz race target below.
+
+
 Do not restart broad research. The goal is a working PortMaster prototype of
 Wave Race 64: Recompiled on the real RG40XX H test device.
 

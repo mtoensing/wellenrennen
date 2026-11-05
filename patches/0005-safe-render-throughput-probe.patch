@@ -1,0 +1,48 @@
+--- a/src/gliden64_renderer.cpp
++++ b/src/gliden64_renderer.cpp
+@@ -64,6 +64,7 @@
+     int (*RomOpen)() = nullptr;
+     void (*RomClosed)() = nullptr;
+     void (*ProcessDList)() = nullptr;
++    void (*RenderProbeFinish)() = nullptr;
+     void (*UpdateScreen)() = nullptr;
+     void (*ViStatusChanged)() = nullptr;
+     void (*ViWidthChanged)() = nullptr;
+@@ -91,6 +92,7 @@
+         get(RomOpen, "RomOpen");
+         get(RomClosed, "RomClosed");
+         get(ProcessDList, "ProcessDList");
++        RenderProbeFinish = reinterpret_cast<void (*)()>(dlsym(handle, "RenderProbeFinish"));
+         get(UpdateScreen, "UpdateScreen");
+         get(ViStatusChanged, "ViStatusChanged");
+         get(ViWidthChanged, "ViWidthChanged");
+@@ -222,7 +224,28 @@
+         ++dls_;
+ 
+         if (!interp_) {
+-            render(1.0f);
++            // Diagnostic only. Replay while send_dl still owns the task:
++            // DP-complete has not been signalled and the game cannot recycle
++            // this frame's graphics data. Never replay from a later VI.
++            static const bool probe = std::getenv("WR64_RENDER_PROBE") != nullptr;
++            static const uint64_t probe_start = SDL_GetTicks64();
++            const bool racing = SDL_GetTicks64() - probe_start >= 45000;
++            if (probe && racing && plugin_.RenderProbeFinish) {
++                plugin_.RenderProbeFinish();
++                const uint64_t start = SDL_GetPerformanceCounter();
++                for (int i = 0; i < 3; ++i) {
++                    render(1.0f);
++                }
++                plugin_.RenderProbeFinish();
++                const double ms = (SDL_GetPerformanceCounter() - start) * 1000.0 /
++                                  SDL_GetPerformanceFrequency();
++                static unsigned samples = 0;
++                if (++samples % 20 == 0) {
++                    std::fprintf(stderr, "[render-probe] triple %.3f ms, mean %.3f ms/render; GPU-complete, no swaps, includes HLE\n", ms, ms / 3.0);
++                }
++            } else {
++                render(1.0f);
++            }
+             return;
+         }
+ 

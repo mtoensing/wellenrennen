@@ -1,0 +1,20 @@
+--- a/src/MupenPlusPluginAPI.cpp
++++ b/src/MupenPlusPluginAPI.cpp
+@@ -2,6 +2,7 @@
+ #include "Types.h"
+ #include "mupenplus/GLideN64_mupenplus.h"
+ #include "N64.h"
++#include "Graphics/OpenGLContext/ThreadedOpenGl/opengl_Wrapper.h"
+ 
+ extern "C" {
+ 
+@@ -10,6 +11,9 @@
+ void GLideN64_InterpBeginDList(float t);
+ EXPORT void CALL InterpNewFrame(void) { GLideN64_InterpNewFrame(); }
+ EXPORT void CALL InterpBeginDList(float t) { GLideN64_InterpBeginDList(t); }
++
++// Diagnostic barrier: includes execution on the GL worker and GPU completion.
++EXPORT void CALL RenderProbeFinish(void) { opengl::FunctionWrapper::wrFinish(); }
+ 
+ EXPORT int CALL RomOpen(void)
+ {
