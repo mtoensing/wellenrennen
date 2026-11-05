@@ -494,3 +494,7 @@ still reports below-target native rates before the steady section. Optical-flow
 synthesis adds latency and can show occlusion/water artifacts; it is not RT64
 geometry interpolation. Results/UI at native 30 Hz are intentionally not
 claimed as 60 unique images/s. No PortMaster PR or public binary release made.
+
+Packaging follow-up: the tracked PortMaster launcher is executable (0755), so
+fresh extraction/deployment carries the entry-point permission rather than
+relying on the earlier manual chmod used during SSH tests.
