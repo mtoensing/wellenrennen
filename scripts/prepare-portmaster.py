@@ -80,7 +80,7 @@ def main():
         if after != before[name]:
             raise RuntimeError(f'Stripping changed executable instructions: {name}')
         report['binaries'][name] = {'bytes': path.stat().st_size, 'text_sha256': after}
-    report['open_gates'] = ['Additional CFW/device testing', 'Manual full-course/controller/exit verification', 'Contributor AI-authorship review attestation']
+    report['open_gates'] = ['Final reduced-asset package smoke test (device unreachable)', 'Additional CFW/device testing', 'Manual full-course/controller/exit verification', 'Contributor AI-authorship review attestation']
     (ROOT / 'dist/portmaster-preparation.json').write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps(report, indent=2))
     print('LOCAL PREPARATION ONLY: no fork, binary upload, or upstream PR was published.')
